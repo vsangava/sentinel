@@ -10,6 +10,7 @@ import (
 	"github.com/vsangava/distractions-free/internal/config"
 	"github.com/vsangava/distractions-free/internal/proxy"
 	"github.com/vsangava/distractions-free/internal/scheduler"
+	"github.com/vsangava/distractions-free/internal/testcli"
 	"github.com/vsangava/distractions-free/internal/web"
 )
 
@@ -42,6 +43,24 @@ func (p *program) Stop(s service.Service) error {
 }
 
 func main() {
+	// Test mode: query blocking status for a domain at a specific time
+	if len(os.Args) > 1 && os.Args[1] == "--test-query" {
+		if len(os.Args) < 4 {
+			log.Fatalf("Usage: %s --test-query <time> <domain>\n", os.Args[0])
+			log.Fatalf("Time format: 2006-01-02 15:04 (example: 2024-04-01 10:30)\n")
+		}
+		// Use local config for test mode (no need for system paths)
+		config.UseLocalConfig = true
+
+		timeStr := os.Args[2]
+		domain := os.Args[3]
+
+		if err := testcli.QueryBlocking(timeStr, domain); err != nil {
+			log.Fatalf("Test query failed: %v", err)
+		}
+		return
+	}
+
 	// Run as regular program without service
 	if len(os.Args) > 1 && os.Args[1] == "--no-service" {
 		config.UseLocalConfig = true
