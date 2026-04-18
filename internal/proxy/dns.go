@@ -4,8 +4,9 @@ import (
 	"log"
 	"strings"
 	"sync"
+
 	"github.com/miekg/dns"
-	"github.com/yourusername/distractions-free/internal/config"
+	"github.com/vsangava/distractions-free/internal/config"
 )
 
 var (

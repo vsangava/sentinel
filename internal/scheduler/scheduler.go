@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yourusername/distractions-free/internal/config"
-	"github.com/yourusername/distractions-free/internal/proxy"
+	"github.com/vsangava/distractions-free/internal/config"
+	"github.com/vsangava/distractions-free/internal/proxy"
 )
 
 var activeBlocks = make(map[string]bool)

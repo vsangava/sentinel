@@ -7,7 +7,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/yourusername/distractions-free/internal/config"
+	"github.com/vsangava/distractions-free/internal/config"
 )
 
 //go:embed static/*

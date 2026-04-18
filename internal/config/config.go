@@ -14,9 +14,9 @@ type TimeSlot struct {
 }
 
 type Rule struct {
-	Domain    string                  `json:"domain"`
-	IsActive  bool                    `json:"is_active"`
-	Schedules map[string][]TimeSlot   `json:"schedules"`
+	Domain    string                `json:"domain"`
+	IsActive  bool                  `json:"is_active"`
+	Schedules map[string][]TimeSlot `json:"schedules"`
 }
 
 type Settings struct {
@@ -26,7 +26,7 @@ type Settings struct {
 
 type Config struct {
 	Settings Settings `json:"settings"`
-	Rules[]Rule   `json:"rules"`
+	Rules    []Rule   `json:"rules"`
 }
 
 var (
@@ -68,16 +68,16 @@ func saveDefaultConfig(path string) error {
 			PrimaryDNS: "8.8.8.8:53",
 			BackupDNS:  "1.1.1.1:53",
 		},
-		Rules:[]Rule{
+		Rules: []Rule{
 			{
 				Domain:   "youtube.com",
 				IsActive: true,
 				Schedules: map[string][]TimeSlot{
-					"Monday":    {{"Start": "09:00", "End": "17:00"}},
-					"Tuesday":   {{"Start": "09:00", "End": "17:00"}},
-					"Wednesday": {{"Start": "09:00", "End": "17:00"}},
-					"Thursday":  {{"Start": "09:00", "End": "17:00"}},
-					"Friday":    {{"Start": "09:00", "End": "17:00"}},
+					"Monday":    {{Start: "09:00", End: "17:00"}},
+					"Tuesday":   {{Start: "09:00", End: "17:00"}},
+					"Wednesday": {{Start: "09:00", End: "17:00"}},
+					"Thursday":  {{Start: "09:00", End: "17:00"}},
+					"Friday":    {{Start: "09:00", End: "17:00"}},
 				},
 			},
 		},

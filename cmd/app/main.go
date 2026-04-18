@@ -7,10 +7,10 @@ import (
 	"runtime"
 
 	"github.com/kardianos/service"
-	"github.com/yourusername/distractions-free/internal/config"
-	"github.com/yourusername/distractions-free/internal/proxy"
-	"github.com/yourusername/distractions-free/internal/scheduler"
-	"github.com/yourusername/distractions-free/internal/web"
+	"github.com/vsangava/distractions-free/internal/config"
+	"github.com/vsangava/distractions-free/internal/proxy"
+	"github.com/vsangava/distractions-free/internal/scheduler"
+	"github.com/vsangava/distractions-free/internal/web"
 )
 
 type program struct{}
