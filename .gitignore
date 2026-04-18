@@ -1,0 +1,11 @@
+# Compiled binaries
+distractions-free
+*.exe
+*.app
+
+# OS specific files
+.DS_Store
+
+# Go workspaces
+go.work
+go.work.sum
