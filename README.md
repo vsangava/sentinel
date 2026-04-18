@@ -146,6 +146,63 @@ Output: Shows `⚠️ Warning will trigger 3 minutes before block!`
 
 ---
 
+## 🌐 Web UI Test Mode (`--test-web`)
+
+A beautiful, interactive web interface for testing DNS blocking queries in your browser.
+
+### Launch the Test UI
+```bash
+./distractions-free --test-web
+```
+Then open your browser to **http://localhost:8040**
+
+### Features
+- **Beautiful gradient UI**: Modern purple gradient design with responsive layout
+- **Time input**: Pick any date/time in format `YYYY-MM-DD HH:MM`
+- **Domain input**: Enter the domain to test (with example placeholder)
+- **Live config viewer**: See the current config in read-only JSON format
+- **Real-time results**: Displays:
+  - Weekday (calculated from the date)
+  - Blocking status with emoji (🚫 BLOCKED or ✓ ALLOWED)
+  - Actual DNS response (real IPs from upstream DNS)
+  - Applicable rules with schedule details
+  - Warning notifications (3-minute pre-block alerts)
+- **Color-coded display**: 
+  - Red for blocked status
+  - Green for allowed status
+  - Yellow warnings for pre-block notifications
+- **Loading animation**: Spinner while query executes
+
+### Web UI Screenshots
+When testing YouTube on Monday at 10:30 (blocked):
+- Status shows: 🚫 **BLOCKED**
+- DNS Response: `0.0.0.0 (blocking response)`
+- Applicable Rules: "✓ ACTIVE: Monday 09:00-17:00"
+
+When testing Google on Saturday at 10:30 (allowed):
+- Status shows: ✓ **ALLOWED (forwarded to upstream DNS)**
+- DNS Response: `google.com. 287 IN A 142.251.215.110`
+- Applicable Rules: "No rules apply"
+
+### Why Use the Web UI Instead of CLI
+- 🎨 **Visual**: See results in a beautiful, easy-to-read format
+- 🔄 **Fast iterations**: Quickly test multiple times/domains without typing commands
+- 📋 **Config viewer**: See your rules configuration side-by-side with results
+- 🌟 **Better UX**: Emoji status indicators, color coding, and smooth animations
+- ⌨️ **Press Enter to submit**: Type time/domain and hit Enter to test
+
+### Example Usage
+1. Launch: `./distractions-free --test-web`
+2. Browser opens to http://localhost:8040
+3. Time field pre-filled with current time
+4. Enter domain: `youtube.com`
+5. Click "Test Query" or press Enter
+6. Instantly see if it's blocked with rule details
+7. Modify time to test different schedules
+8. See DNS responses from real upstream servers
+
+---
+
 ## 🚀 Build & Installation
 
 ### 1. Compile the Binary
