@@ -13,6 +13,134 @@ import (
 
 const timeFormat = "2006-01-02 15:04"
 
+// QueryResult holds the structured result of a blocking query.
+type QueryResult struct {
+	Time              string                 `json:"time"`
+	Weekday           string                 `json:"weekday"`
+	Domain            string                 `json:"domain"`
+	IsBlocked         bool                   `json:"is_blocked"`
+	BlockingStatus    string                 `json:"blocking_status"`
+	DNSResponse       string                 `json:"dns_response"`
+	ApplicableRules   []RuleInfo             `json:"applicable_rules"`
+	HasWarning        bool                   `json:"has_warning"`
+	WarningMessage    string                 `json:"warning_message,omitempty"`
+	Error             string                 `json:"error,omitempty"`
+}
+
+// RuleInfo holds information about an applicable blocking rule.
+type RuleInfo struct {
+	Domain    string       `json:"domain"`
+	Schedules []ScheduleInfo `json:"schedules"`
+}
+
+// ScheduleInfo holds schedule information.
+type ScheduleInfo struct {
+	Weekday string `json:"weekday"`
+	Start   string `json:"start"`
+	End     string `json:"end"`
+	IsActive bool  `json:"is_active"`
+}
+
+// GetQueryResult returns structured test query result without printing.
+func GetQueryResult(timeStr, domain string) QueryResult {
+	result := QueryResult{
+		Time:   timeStr,
+		Domain: domain,
+	}
+
+	// Parse the time
+	testTime, err := time.Parse(timeFormat, timeStr)
+	if err != nil {
+		result.Error = fmt.Sprintf("Invalid time format. Use: %s (example: 2024-04-01 10:30)", timeFormat)
+		return result
+	}
+
+	result.Weekday = testTime.Weekday().String()
+
+	// Normalize domain
+	domain = strings.TrimSuffix(domain, ".")
+	if domain == "" {
+		result.Error = "Domain cannot be empty"
+		return result
+	}
+	result.Domain = domain
+
+	// Load config
+	if err := config.LoadConfig(); err != nil {
+		result.Error = fmt.Sprintf("Failed to load config: %v", err)
+		return result
+	}
+
+	cfg := config.GetConfig()
+
+	// Evaluate blocking rules at this time
+	blockedDomains := scheduler.EvaluateRulesAtTime(testTime, cfg)
+	result.IsBlocked = blockedDomains[domain]
+
+	// Create a DNS query
+	dnsQuery := new(dns.Msg)
+	dnsQuery.SetQuestion(domain+".", dns.TypeA)
+
+	// Get the DNS response
+	response, err := proxy.GetDNSResponse(dnsQuery, blockedDomains, cfg.Settings.PrimaryDNS, cfg.Settings.BackupDNS)
+	if err != nil {
+		result.Error = fmt.Sprintf("DNS query failed: %v", err)
+		return result
+	}
+
+	// Set blocking status
+	if result.IsBlocked {
+		result.BlockingStatus = "🚫 BLOCKED"
+		if len(response.Answer) > 0 {
+			if a, ok := response.Answer[0].(*dns.A); ok {
+				result.DNSResponse = fmt.Sprintf("%s (blocking response)", a.A.String())
+			}
+		}
+	} else {
+		result.BlockingStatus = "✓ ALLOWED (forwarded to upstream DNS)"
+		if len(response.Answer) > 0 {
+			result.DNSResponse = response.Answer[0].String()
+		} else {
+			result.DNSResponse = "No DNS answer (domain may not exist or DNS error)"
+		}
+	}
+
+	// Find applicable rules
+	for _, rule := range cfg.Rules {
+		if !rule.IsActive || rule.Domain != domain {
+			continue
+		}
+
+		ruleInfo := RuleInfo{Domain: rule.Domain}
+
+		if slots, exists := rule.Schedules[testTime.Weekday().String()]; exists {
+			for _, slot := range slots {
+				currentTime := testTime.Format("15:04")
+				isActive := currentTime >= slot.Start && currentTime < slot.End
+				ruleInfo.Schedules = append(ruleInfo.Schedules, ScheduleInfo{
+					Weekday:  testTime.Weekday().String(),
+					Start:    slot.Start,
+					End:      slot.End,
+					IsActive: isActive,
+				})
+			}
+		}
+
+		if len(ruleInfo.Schedules) > 0 {
+			result.ApplicableRules = append(result.ApplicableRules, ruleInfo)
+		}
+	}
+
+	// Check for warnings
+	warnings := scheduler.CheckWarningDomainsAtTime(testTime, cfg)
+	if contains(warnings, domain) {
+		result.HasWarning = true
+		result.WarningMessage = "⚠️ Warning will trigger 3 minutes before block!"
+	}
+
+	return result
+}
+
 // QueryBlocking tests whether a domain would be blocked at a specific time,
 // and returns the DNS response (either 0.0.0.0 or upstream result).
 func QueryBlocking(timeStr, domain string) error {

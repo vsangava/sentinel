@@ -43,6 +43,17 @@ func (p *program) Stop(s service.Service) error {
 }
 
 func main() {
+	// Test web UI mode: interactive web interface for testing blocking status
+	if len(os.Args) > 1 && os.Args[1] == "--test-web" {
+		// Use local config for test mode (no need for system paths)
+		config.UseLocalConfig = true
+
+		log.Println("Starting test web UI on http://localhost:8040")
+		log.Println("Open your browser to http://localhost:8040 to test queries")
+		web.StartTestWebServer()
+		return
+	}
+
 	// Test mode: query blocking status for a domain at a specific time
 	if len(os.Args) > 1 && os.Args[1] == "--test-query" {
 		if len(os.Args) < 4 {
