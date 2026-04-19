@@ -20,16 +20,16 @@ import (
 func testAppleScript() {
 	log.Println("Testing AppleScript generation and execution...")
 
-	// Test domains - facebook for closing tabs, reddit for warning
+	// Test domains - facebook for closing tabs, reddit and roblox for warning
 	closeTabsDomains := []string{"facebook.com"}
-	warningDomains := []string{"reddit.com"}
+	warningDomains := []string{"reddit.com", "roblox.com"}
 
 	// Generate scripts
-	warningScript := fmt.Sprintf(`display alert "Distractions-Free" message "Tabs for %s will close in 3 minutes." buttons {"OK"} giving up after 10`, strings.Join(warningDomains, ", "))
+	warningScript := fmt.Sprintf(`display alert "Distractions-Free" message "Tabs for %s will close in 3 minutes." buttons {"OK"} giving up after 15`, strings.Join(warningDomains, ", "))
 	closeTabsScript := scheduler.GetScriptGenerator().GenerateCloseTabsScript(closeTabsDomains)
 
 	// Display generated scripts
-	log.Println("=== WARNING ALERT SCRIPT (reddit.com) ===")
+	log.Println("=== WARNING ALERT SCRIPT (reddit.com, roblox.com) ===")
 	log.Println(warningScript)
 	log.Println()
 
