@@ -300,3 +300,58 @@ When testing Google on Saturday at 10:30 (allowed):
 6. Instantly see if it's blocked with rule details
 7. Modify time to test different schedules
 8. See DNS responses from real upstream servers
+
+---
+
+## 🖥️ AppleScript Test Mode (`--test-applescript`)
+
+Test the macOS AppleScript integration for warning notifications and tab closing **without requiring privileges or service installation**.
+
+### Quick Test
+Run the AppleScript test to verify GUI interactions:
+``` bash
+./distractions-free --test-applescript
+```
+
+### What It Does
+- **Scans Browser Tabs**: Checks Chrome and Safari for open tabs matching test domains
+- **Conditional Warnings**: Shows native macOS alert only for domains that have open tabs
+- **Closes Tabs**: Automatically closes tabs for facebook.com after a brief delay
+- **Interactive Confirmation**: Asks for user confirmation before executing scripts
+
+### Test Domains
+- **Warning Domains**: reddit.com, roblox.com (alert shown only if tabs are open)
+- **Close Domains**: facebook.com (tabs closed regardless of open status)
+
+### Output Example
+```
+=== CLOSE TABS SCRIPT (facebook.com) ===
+tell application "Google Chrome"
+    repeat with w in windows
+        set tabList to tabs of w whose URL contains "facebook.com"
+        repeat with t in tabList
+            close t
+        end repeat
+    end repeat
+end tell
+tell application "Safari"
+    repeat with w in windows
+        set tabList to tabs of w whose URL contains "facebook.com"
+        repeat with t in tabList
+            close t
+        end repeat
+    end repeat
+end tell
+
+Execute scripts? (y/N): y
+Executing warning script...
+Sleeping 2 seconds before close tabs script...
+Executing close tabs script...
+```
+
+### Why This Feature is Useful
+- ✅ **Verify AppleScript**: Test that macOS GUI interactions work correctly
+- ✅ **No system impact**: Uses test domains and requires user confirmation
+- ✅ **Debug notifications**: Ensure alerts display properly in user context
+- ✅ **Test tab closing**: Validate browser automation works across Chrome/Safari
+- ✅ **Service compatibility**: Confirms scripts work in both interactive and service modes
