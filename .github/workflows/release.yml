@@ -1,0 +1,56 @@
+name: Release Binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        include:
+          # macOS builds (ARM64 and x86_64)
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            output_name: distractions-free-macos-arm64
+          - os: macos-13
+            goos: darwin
+            goarch: amd64
+            output_name: distractions-free-macos-amd64
+          # Windows build
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            output_name: distractions-free-windows-amd64.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Build Binary
+        run: go build -o ${{ matrix.output_name }} ./cmd/app
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+
+      - name: Run Tests
+        run: go test ./...
+
+      - name: Upload Binary to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ${{ matrix.output_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

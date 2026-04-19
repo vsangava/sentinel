@@ -368,10 +368,10 @@ func TestCheckWarningDomainsAtTime_WarningTriggersAtEveryMinute(t *testing.T) {
 	}
 
 	testCases := []struct {
-		name          string
-		minute        int
-		shouldWarn    bool
-		description   string
+		name        string
+		minute      int
+		shouldWarn  bool
+		description string
 	}{
 		{
 			name:        "3 minutes before",

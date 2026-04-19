@@ -14,35 +14,56 @@ Unlike browser extensions that can be easily disabled, **Distractions-Free** run
 
 ---
 
-## 🛠 Prerequisites
+## ⚡ Quick Download
 
-If you are developing or compiling this on macOS, you need the Go compiler installed:
+**Don't want to compile?** Download pre-built binaries from the latest [GitHub Release](https://github.com/vsangava/distractions-free/releases):
+
+- 🍎 **macOS Apple Silicon** (M1/M2/M3): `distractions-free-macos-arm64`
+- 🍎 **macOS Intel** (x86_64): `distractions-free-macos-amd64`
+- 🪟 **Windows** (x86_64): `distractions-free-windows-amd64.exe`
+
+Then skip to **Step 2** in the installation guide below.
+
+---
+
+## 🛠 Prerequisites (For Building from Source)
+
+If you want to compile the binary yourself, you need the Go compiler installed:
 ``` bash
 brew install go
 ```
 
 ---
 
-## 🚀 Build & Installation
+## 🚀 Installation & Setup
 
-### 1. Compile the Binary
-Clone the repository and build the self-contained executable:
+### Step 1: Get the Binary
+
+**Option A: Download Pre-built Binary** (Recommended)
+1. Go to [GitHub Releases](https://github.com/vsangava/distractions-free/releases)
+2. Download the binary for your system
+3. Make it executable: `chmod +x distractions-free-macos-*`
+
+**Option B: Build from Source**
+Clone and build:
 ``` bash
+git clone https://github.com/vsangava/distractions-free.git
+cd distractions-free
 go build -o distractions-free ./cmd/app
 ```
 
-### 2. Install the Background Service
+### Step 2: Install the Background Service
 Because this app runs a local DNS server on port 53, it requires Root/Administrator privileges.
 ``` bash
 sudo ./distractions-free install
 ```
 
-### 3. Start the Service
+### Step 3: Start the Service
 ``` bash
 sudo ./distractions-free start
 ```
 
-### 4. Point Your OS to the Proxy
+### Step 4: Point Your OS to the Proxy
 Tell macOS to use your new local DNS proxy instead of your router's default DNS.
 ``` bash
 # If using Wi-Fi:
@@ -355,3 +376,63 @@ Executing close tabs script...
 - ✅ **Debug notifications**: Ensure alerts display properly in user context
 - ✅ **Test tab closing**: Validate browser automation works across Chrome/Safari
 - ✅ **Service compatibility**: Confirms scripts work in both interactive and service modes
+
+---
+
+## 📦 Release Process (For Maintainers)
+
+### How Releases Work
+
+This project uses **GitHub Actions** to automatically build and release binaries whenever a new version tag is pushed.
+
+### Making a Release
+
+1. **Create a version tag** (semantic versioning):
+   ```bash
+   git tag v1.0.0
+   git push origin v1.0.0
+   ```
+
+2. **Automatic Build Process**:
+   - GitHub Actions workflow triggers automatically
+   - Builds binaries for macOS (ARM64 + x86_64) and Windows (x86_64)
+   - Runs full test suite on each platform
+   - Uploads binaries to the release
+
+3. **Release is Created**:
+   - Visit [Releases page](https://github.com/vsangava/distractions-free/releases)
+   - Add release notes describing changes
+   - Users can now download binaries
+
+### Workflow Details
+
+The `.github/workflows/release.yml` file:
+- **Triggers on**: Git tags matching `v*` (e.g., `v1.0.0`)
+- **Builds for**:
+  - macOS ARM64 (Apple Silicon: M1/M2/M3)
+  - macOS x86_64 (Intel Macs)
+  - Windows x86_64
+- **Tests**: Runs `go test ./...` on each platform before release
+- **Uploads**: Uses GitHub's release artifacts API
+
+### Example Release Workflow
+
+```bash
+# Make final commits and tag version
+git tag v1.0.0
+git push origin v1.0.0
+
+# → GitHub Actions automatically:
+#   1. Builds 3 binaries
+#   2. Runs all tests
+#   3. Creates release with binaries attached
+#   4. Available at https://github.com/vsangava/distractions-free/releases/tag/v1.0.0
+```
+
+### Next Steps for Production
+
+When ready for wider distribution:
+- [ ] Add code signing for macOS (required for newer macOS versions)
+- [ ] Create Homebrew formula for `brew install distractions-free`
+- [ ] Create Scoop manifest for Windows package manager
+- [ ] Consider Windows installer (.msi) using WiX or NSIS
