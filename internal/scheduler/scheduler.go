@@ -240,6 +240,18 @@ func evaluateRules() {
 	}
 }
 
+func getMacUser() string {
+	out, err := exec.Command("stat", "-f", "%Su", "/dev/console").Output()
+	if err != nil {
+		return ""
+	}
+	user := strings.TrimSpace(string(out))
+	if user == "root" || user == "" {
+		return ""
+	}
+	return user
+}
+
 func runAsMacUser(scriptContent string) {
 	if runtime.GOOS != "darwin" {
 		return
@@ -247,11 +259,122 @@ func runAsMacUser(scriptContent string) {
 
 	scriptPath := "/tmp/df_script.scpt"
 	os.WriteFile(scriptPath, []byte(scriptContent), 0644)
-	exec.Command("osascript", scriptPath).Run()
+
+	user := getMacUser()
+	if user == "" || os.Getuid() != 0 {
+		exec.Command("osascript", scriptPath).Run()
+		return
+	}
+
+	exec.Command("su", "-", user, "-c", "osascript "+scriptPath).Run()
+}
+
+func getOpenBrowserDomains(domains []string) []string {
+	if runtime.GOOS != "darwin" || len(domains) == 0 {
+		return nil
+	}
+
+	var quotedDomains []string
+	for _, d := range domains {
+		quotedDomains = append(quotedDomains, fmt.Sprintf(`"%s"`, strings.TrimSpace(d)))
+	}
+	domainListStr := "{" + strings.Join(quotedDomains, ", ") + "}"
+
+	script := fmt.Sprintf(`
+		set domainsToCheck to %s
+		set matchedDomains to {}
+
+		if application "Google Chrome" is running then
+			tell application "Google Chrome"
+				repeat with w in windows
+					repeat with t in tabs of w
+						set tabURL to URL of t
+						repeat with d in domainsToCheck
+							if tabURL contains d then
+								if matchedDomains does not contain d then
+									set end of matchedDomains to d
+								end if
+							end if
+						end repeat
+					end repeat
+				end repeat
+			end tell
+		end if
+
+		if application "Safari" is running then
+			tell application "Safari"
+				repeat with w in windows
+					repeat with t in tabs of w
+						set tabURL to URL of t
+						repeat with d in domainsToCheck
+							if tabURL contains d then
+								if matchedDomains does not contain d then
+									set end of matchedDomains to d
+								end if
+							end if
+						end repeat
+					end repeat
+				end repeat
+			end tell
+		end if
+
+		if matchedDomains is {} then
+			return ""
+		else
+			set matchedString to ""
+			repeat with i from 1 to count of matchedDomains
+				if i > 1 then
+					set matchedString to matchedString & ", "
+				end if
+				set matchedString to matchedString & item i of matchedDomains
+			end repeat
+			return matchedString
+		end if
+	`, domainListStr)
+
+	out, err := exec.Command("osascript", "-e", script).Output()
+	if err != nil {
+		log.Printf("Error checking open browser domains: %v", err)
+		return nil
+	}
+
+	result := strings.TrimSpace(string(out))
+	if result == "" {
+		return nil
+	}
+
+	parts := strings.Split(result, ", ")
+	seen := make(map[string]bool, len(parts))
+	var unique []string
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if !seen[part] {
+			seen[part] = true
+			unique = append(unique, part)
+		}
+	}
+
+	if len(unique) == 0 {
+		return nil
+	}
+	return unique
+}
+
+// GetOpenBrowserDomains returns currently open browser domains from the provided list.
+func GetOpenBrowserDomains(domains []string) []string {
+	return getOpenBrowserDomains(domains)
 }
 
 func runMacOSWarning(domains []string) {
-	script := scriptGenerator.GenerateWarningScript(domains)
+	openDomains := getOpenBrowserDomains(domains)
+	if len(openDomains) == 0 {
+		return
+	}
+
+	script := scriptGenerator.GenerateWarningScript(openDomains)
 	scriptExecutor.LogScript(script)
 	scriptExecutor.ExecuteScript(script)
 }

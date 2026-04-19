@@ -24,28 +24,28 @@ func testAppleScript() {
 	closeTabsDomains := []string{"facebook.com"}
 	warningDomains := []string{"reddit.com", "roblox.com"}
 
-	// Generate scripts
-	warningScript := fmt.Sprintf(`display alert "Distractions-Free" message "Tabs for %s will close in 3 minutes." buttons {"OK"} giving up after 15`, strings.Join(warningDomains, ", "))
 	closeTabsScript := scheduler.GetScriptGenerator().GenerateCloseTabsScript(closeTabsDomains)
 
-	// Display generated scripts
-	log.Println("=== WARNING ALERT SCRIPT (reddit.com, roblox.com) ===")
-	log.Println(warningScript)
-	log.Println()
-
+	// Display close script
 	log.Println("=== CLOSE TABS SCRIPT (facebook.com) ===")
 	log.Println(closeTabsScript)
 	log.Println()
 
-	// Ask user if they want to execute
 	log.Println("Execute scripts? (y/N): ")
 	var response string
 	fmt.Scanln(&response)
 
 	if response == "y" || response == "Y" {
-		log.Println("Executing warning script...")
-		if err := scheduler.GetScriptExecutor().ExecuteScript(warningScript); err != nil {
-			log.Printf("Warning script execution failed: %v", err)
+		warningScript := ""
+		openWarningDomains := scheduler.GetOpenBrowserDomains(warningDomains)
+		if len(openWarningDomains) > 0 {
+			warningScript = fmt.Sprintf(`display alert "Distractions-Free" message "Tabs for %s will close in 3 minutes." buttons {"OK"} giving up after 15`, strings.Join(openWarningDomains, ", "))
+			log.Println("Executing warning script...")
+			if err := scheduler.GetScriptExecutor().ExecuteScript(warningScript); err != nil {
+				log.Printf("Warning script execution failed: %v", err)
+			}
+		} else {
+			log.Println("No matching open warning domains found; warning not executed.")
 		}
 
 		log.Println("Sleeping 2 seconds before close tabs script...")
