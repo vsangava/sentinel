@@ -1,10 +1,13 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
+	"time"
 
 	"github.com/kardianos/service"
 	"github.com/vsangava/distractions-free/internal/config"
@@ -13,6 +16,49 @@ import (
 	"github.com/vsangava/distractions-free/internal/testcli"
 	"github.com/vsangava/distractions-free/internal/web"
 )
+
+func testAppleScript() {
+	log.Println("Testing AppleScript generation and execution...")
+
+	// Test domains - facebook for closing tabs, reddit for warning
+	closeTabsDomains := []string{"facebook.com"}
+	warningDomains := []string{"reddit.com"}
+
+	// Generate scripts
+	warningScript := fmt.Sprintf(`display alert "Distractions-Free" message "Tabs for %s will close in 3 minutes." buttons {"OK"} giving up after 10`, strings.Join(warningDomains, ", "))
+	closeTabsScript := scheduler.GetScriptGenerator().GenerateCloseTabsScript(closeTabsDomains)
+
+	// Display generated scripts
+	log.Println("=== WARNING ALERT SCRIPT (reddit.com) ===")
+	log.Println(warningScript)
+	log.Println()
+
+	log.Println("=== CLOSE TABS SCRIPT (facebook.com) ===")
+	log.Println(closeTabsScript)
+	log.Println()
+
+	// Ask user if they want to execute
+	log.Println("Execute scripts? (y/N): ")
+	var response string
+	fmt.Scanln(&response)
+
+	if response == "y" || response == "Y" {
+		log.Println("Executing warning script...")
+		if err := scheduler.GetScriptExecutor().ExecuteScript(warningScript); err != nil {
+			log.Printf("Warning script execution failed: %v", err)
+		}
+
+		log.Println("Sleeping 2 seconds before close tabs script...")
+		time.Sleep(2 * time.Second)
+
+		log.Println("Executing close tabs script...")
+		if err := scheduler.GetScriptExecutor().ExecuteScript(closeTabsScript); err != nil {
+			log.Printf("Close tabs script execution failed: %v", err)
+		}
+	} else {
+		log.Println("Scripts not executed (use 'y' to execute)")
+	}
+}
 
 type program struct{}
 
@@ -69,6 +115,12 @@ func main() {
 		if err := testcli.QueryBlocking(timeStr, domain); err != nil {
 			log.Fatalf("Test query failed: %v", err)
 		}
+		return
+	}
+
+	// Test AppleScript generation and execution
+	if len(os.Args) > 1 && os.Args[1] == "--test-applescript" {
+		testAppleScript()
 		return
 	}
 

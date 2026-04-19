@@ -15,6 +15,131 @@ import (
 
 var activeBlocks = make(map[string]bool)
 
+// ScriptExecutor interface for testing AppleScript execution
+type ScriptExecutor interface {
+	ExecuteScript(script string) error
+	LogScript(script string)
+}
+
+// MacOSScriptExecutor executes scripts on macOS
+type MacOSScriptExecutor struct{}
+
+func (e *MacOSScriptExecutor) ExecuteScript(script string) error {
+	runAsMacUser(script)
+	return nil // runAsMacUser doesn't return an error, so we assume success
+}
+
+func (e *MacOSScriptExecutor) LogScript(script string) {
+	log.Printf("AppleScript generated:\n%s", script)
+}
+
+// TestScriptExecutor logs scripts instead of executing them
+type TestScriptExecutor struct {
+	executedScripts []string
+}
+
+func (e *TestScriptExecutor) ExecuteScript(script string) error {
+	e.executedScripts = append(e.executedScripts, script)
+	e.LogScript(script)
+	return nil
+}
+
+func (e *TestScriptExecutor) LogScript(script string) {
+	log.Printf("TEST MODE - AppleScript would execute:\n%s", script)
+}
+
+// Global executor - can be replaced for testing
+var scriptExecutor ScriptExecutor = &MacOSScriptExecutor{}
+
+// AppleScriptGenerator interface for testing script generation
+type AppleScriptGenerator interface {
+	GenerateWarningScript(domains []string) string
+	GenerateCloseTabsScript(domains []string) string
+}
+
+// MacOSAppleScriptGenerator generates macOS AppleScripts
+type MacOSAppleScriptGenerator struct{}
+
+func (g *MacOSAppleScriptGenerator) GenerateWarningScript(domains []string) string {
+	msg := fmt.Sprintf("Tabs for %s will close in 3 minutes.", strings.Join(domains, ", "))
+	return fmt.Sprintf(`display notification "%s" with title "Distractions-Free" subtitle "Upcoming Block" sound name "Basso"`, msg)
+}
+
+func (g *MacOSAppleScriptGenerator) GenerateCloseTabsScript(domains []string) string {
+	var quotedDomains []string
+	for _, d := range domains {
+		quotedDomains = append(quotedDomains, fmt.Sprintf(`"%s"`, strings.TrimPrefix(d, "www.")))
+	}
+	domainListStr := "{" + strings.Join(quotedDomains, ", ") + "}"
+
+	return fmt.Sprintf(`
+		set domainsToBlock to %s
+		
+		if application "Google Chrome" is running then
+			tell application "Google Chrome"
+				set tabsToClose to {}
+				repeat with w in windows
+					repeat with t in tabs of w
+						set tabURL to URL of t
+						repeat with d in domainsToBlock
+							if tabURL contains d then
+								set end of tabsToClose to t
+								exit repeat
+							end if
+						end repeat
+					end repeat
+				end repeat
+				repeat with t in tabsToClose
+					close t
+				end repeat
+			end tell
+		end if
+
+		if application "Safari" is running then
+			tell application "Safari"
+				set tabsToClose to {}
+				repeat with w in windows
+					repeat with t in tabs of w
+						set tabURL to URL of t
+						repeat with d in domainsToBlock
+							if tabURL contains d then
+								set end of tabsToClose to t
+								exit repeat
+							end if
+						end repeat
+					end repeat
+				end repeat
+				repeat with t in tabsToClose
+					close t
+				end repeat
+			end tell
+		end if
+	`, domainListStr)
+}
+
+// Global generator - can be replaced for testing
+var scriptGenerator AppleScriptGenerator = &MacOSAppleScriptGenerator{}
+
+// GetScriptGenerator returns the current script generator (for testing)
+func GetScriptGenerator() AppleScriptGenerator {
+	return scriptGenerator
+}
+
+// SetScriptGenerator sets the script generator (for testing)
+func SetScriptGenerator(generator AppleScriptGenerator) {
+	scriptGenerator = generator
+}
+
+// GetScriptExecutor returns the current script executor (for testing)
+func GetScriptExecutor() ScriptExecutor {
+	return scriptExecutor
+}
+
+// SetScriptExecutor sets the script executor (for testing)
+func SetScriptExecutor(executor ScriptExecutor) {
+	scriptExecutor = executor
+}
+
 // EvaluateRulesAtTime evaluates blocking rules at a specific time and returns blocked domains.
 // This is the testable function that doesn't depend on time.Now().
 func EvaluateRulesAtTime(t time.Time, cfg config.Config) map[string]bool {
@@ -115,76 +240,26 @@ func evaluateRules() {
 	}
 }
 
-func getMacUser() string {
-	out, err := exec.Command("stat", "-f", "%Su", "/dev/console").Output()
-	if err != nil {
-		return ""
-	}
-	user := strings.TrimSpace(string(out))
-	if user == "root" {
-		return ""
-	}
-	return user
-}
-
 func runAsMacUser(scriptContent string) {
 	if runtime.GOOS != "darwin" {
-		return
-	}
-	user := getMacUser()
-	if user == "" {
 		return
 	}
 
 	scriptPath := "/tmp/df_script.scpt"
 	os.WriteFile(scriptPath, []byte(scriptContent), 0644)
-	exec.Command("su", "-", user, "-c", "osascript "+scriptPath).Run()
+	exec.Command("osascript", scriptPath).Run()
 }
 
 func runMacOSWarning(domains []string) {
-	msg := fmt.Sprintf("Tabs for %s will close in 3 minutes.", strings.Join(domains, ", "))
-	script := fmt.Sprintf(`display notification "%s" with title "Distractions-Free" subtitle "Upcoming Block" sound name "Basso"`, msg)
-	runAsMacUser(script)
+	script := scriptGenerator.GenerateWarningScript(domains)
+	scriptExecutor.LogScript(script)
+	scriptExecutor.ExecuteScript(script)
 }
 
 func closeMacOSTabs(domains []string) {
-	var quotedDomains []string
-	for _, d := range domains {
-		quotedDomains = append(quotedDomains, fmt.Sprintf(`"%s"`, strings.TrimPrefix(d, "www.")))
-	}
-	domainListStr := "{" + strings.Join(quotedDomains, ", ") + "}"
-
-	script := fmt.Sprintf(`
-		set domainsToBlock to %s
-		
-		if application "Google Chrome" is running then
-			tell application "Google Chrome"
-				repeat with w in windows
-					repeat with t in tabs of w
-						set tabURL to URL of t
-						repeat with d in domainsToBlock
-							if tabURL contains d then close t
-						end repeat
-					end repeat
-				end repeat
-			end tell
-		end if
-
-		if application "Safari" is running then
-			tell application "Safari"
-				repeat with w in windows
-					repeat with t in tabs of w
-						set tabURL to URL of t
-						repeat with d in domainsToBlock
-							if tabURL contains d then close t
-						end repeat
-					end repeat
-				end repeat
-			end tell
-		end if
-	`, domainListStr)
-
-	runAsMacUser(script)
+	script := scriptGenerator.GenerateCloseTabsScript(domains)
+	scriptExecutor.LogScript(script)
+	scriptExecutor.ExecuteScript(script)
 }
 
 func flushDNS() {
