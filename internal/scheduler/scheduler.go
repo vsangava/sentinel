@@ -16,6 +16,9 @@ import (
 )
 
 var activeBlocks = make(map[string]bool)
+var activeBlocksMu sync.RWMutex
+var lastEvalTime time.Time
+
 var lastWarningTime = make(map[string]time.Time)
 var lastWarningMu sync.Mutex
 
@@ -147,6 +150,17 @@ func SetScriptExecutor(executor ScriptExecutor) {
 	scriptExecutor = executor
 }
 
+// GetStatus returns the currently blocked domains and the last evaluation time.
+func GetStatus() (blocked map[string]bool, lastEval time.Time) {
+	activeBlocksMu.RLock()
+	defer activeBlocksMu.RUnlock()
+	cp := make(map[string]bool, len(activeBlocks))
+	for k, v := range activeBlocks {
+		cp[k] = v
+	}
+	return cp, lastEvalTime
+}
+
 // EvaluateRulesAtTime evaluates blocking rules at a specific time and returns blocked domains.
 // This is the testable function that doesn't depend on time.Now().
 func EvaluateRulesAtTime(t time.Time, cfg config.Config) map[string]bool {
@@ -248,7 +262,10 @@ func evaluateRules() {
 	}
 	requiresFlush := len(newlyBlockedDomains) > 0 || len(newBlocked) != len(activeBlocks)
 
+	activeBlocksMu.Lock()
 	activeBlocks = newBlocked
+	lastEvalTime = now
+	activeBlocksMu.Unlock()
 	proxy.UpdateBlockedDomains(newBlocked)
 
 	if len(warningDomains) > 0 {

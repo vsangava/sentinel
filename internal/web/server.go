@@ -7,9 +7,11 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/vsangava/distractions-free/internal/config"
+	"github.com/vsangava/distractions-free/internal/scheduler"
 	"github.com/vsangava/distractions-free/internal/testcli"
 )
 
@@ -78,6 +80,59 @@ func ValidatePostedConfig(cfg config.Config) error {
 		}
 	}
 	return nil
+}
+
+// UpdateConfigHandler accepts a full config payload, validates it, writes it to disk, and reloads.
+func UpdateConfigHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var cfg config.Config
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	if err := ValidatePostedConfig(cfg); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	path, err := config.GetConfigFilePath()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "cannot resolve config path: " + err.Error()})
+		return
+	}
+
+	// Preserve the existing auth token — callers cannot replace it via this endpoint.
+	existing := config.GetConfig()
+	cfg.Settings.AuthToken = existing.Settings.AuthToken
+
+	data, _ := json.MarshalIndent(cfg, "", "  ")
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "failed to write config: " + err.Error()})
+		return
+	}
+	if err := config.LoadConfig(); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "config written but reload failed: " + err.Error()})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// StatusHandler returns the currently blocked domains and the last evaluation timestamp.
+func StatusHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	blocked, lastEval := scheduler.GetStatus()
+	json.NewEncoder(w).Encode(map[string]any{
+		"blocked_domains": blocked,
+		"last_evaluated":  lastEval,
+	})
 }
 
 // TestQueryHandler handles test queries for the web UI.
@@ -179,7 +234,9 @@ func StartWebServer() {
 	mux := http.NewServeMux()
 	mux.Handle("/", staticHandler)
 	mux.HandleFunc("/api/config", ConfigHandler)
+	mux.HandleFunc("/api/status", authMiddleware(StatusHandler))
 	mux.HandleFunc("/api/test-query", authMiddleware(TestQueryHandler))
+	mux.HandleFunc("/api/config/update", authMiddleware(UpdateConfigHandler))
 
 	log.Println("Web server starting on http://localhost:8040")
 	if err := http.ListenAndServe("127.0.0.1:8040", mux); err != nil {
@@ -201,7 +258,9 @@ func StartTestWebServer() {
 	mux := http.NewServeMux()
 	mux.Handle("/", staticHandler)
 	mux.HandleFunc("/api/config", ConfigHandler)
+	mux.HandleFunc("/api/status", authMiddleware(StatusHandler))
 	mux.HandleFunc("/api/test-query", authMiddleware(TestQueryHandler))
+	mux.HandleFunc("/api/config/update", authMiddleware(UpdateConfigHandler))
 
 	log.Println("Test web server starting on http://localhost:8040")
 	if err := http.ListenAndServe("127.0.0.1:8040", mux); err != nil {
