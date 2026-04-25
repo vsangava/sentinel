@@ -399,6 +399,7 @@
                 <h2 style="color: #333;">Currently Blocked Domains</h2>
                 <button class="button-refresh" onclick="loadStatus()">↻ Refresh</button>
             </div>
+            <div id="enforcementBadge" style="margin-bottom: 12px;"></div>
             <div class="status-meta" id="statusMeta"></div>
             <div id="statusContent" style="margin-top: 16px;">
                 <p style="color: #999;">Loading...</p>
@@ -533,6 +534,16 @@
                 const data = await response.json();
                 const blocked = data.blocked_domains || {};
                 const domains = Object.keys(blocked).filter(k => blocked[k]);
+
+                const modeLabels = {
+                    hosts:  { text: 'Standard (hosts file)',     color: '#28a745' },
+                    dns:    { text: 'DNS Proxy',                  color: '#007bff' },
+                    strict: { text: 'Strict (DNS + Firewall)',    color: '#dc3545' },
+                };
+                const mode = data.enforcement_mode || 'hosts';
+                const label = modeLabels[mode] || { text: mode, color: '#6c757d' };
+                document.getElementById('enforcementBadge').innerHTML =
+                    '<span style="display:inline-block;padding:4px 12px;border-radius:12px;font-size:13px;font-weight:600;color:#fff;background:' + label.color + '">⚙ ' + label.text + '</span>';
 
                 if (data.last_evaluated) {
                     const d = new Date(data.last_evaluated);

@@ -56,6 +56,14 @@ func ValidatePostedConfig(cfg config.Config) error {
 		"Sunday":    true,
 	}
 
+	if mode := cfg.Settings.EnforcementMode; mode != "" {
+		switch mode {
+		case "hosts", "dns", "strict":
+		default:
+			return errors.New("invalid enforcement_mode: must be 'hosts', 'dns', or 'strict'")
+		}
+	}
+
 	for _, rule := range cfg.Rules {
 		if rule.Domain == "" {
 			return errors.New("rule domain cannot be empty")
@@ -142,8 +150,9 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 		lastEval = time.Now()
 	}
 	json.NewEncoder(w).Encode(map[string]any{
-		"blocked_domains": blocked,
-		"last_evaluated":  lastEval,
+		"blocked_domains":  blocked,
+		"last_evaluated":   lastEval,
+		"enforcement_mode": config.GetConfig().Settings.GetEnforcementMode(),
 	})
 }
 
