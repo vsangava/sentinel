@@ -43,6 +43,8 @@ func ConfigHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("config reload warning: %v", err)
 	}
 	cfg := config.GetConfig()
+	// Ensure enforcement_mode is always visible in the UI even for configs written before the field existed.
+	cfg.Settings.EnforcementMode = cfg.Settings.GetEnforcementMode()
 	json.NewEncoder(w).Encode(cfg)
 }
 
