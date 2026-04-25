@@ -126,9 +126,15 @@ func UpdateConfigHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // StatusHandler returns the currently blocked domains and the last evaluation timestamp.
+// When the scheduler is not running (e.g. --test-web mode), it evaluates rules at
+// time.Now() directly from config so the result is always meaningful.
 func StatusHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	blocked, lastEval := scheduler.GetStatus()
+	if lastEval.IsZero() {
+		blocked = scheduler.EvaluateRulesAtTime(time.Now(), config.GetConfig())
+		lastEval = time.Now()
+	}
 	json.NewEncoder(w).Encode(map[string]any{
 		"blocked_domains": blocked,
 		"last_evaluated":  lastEval,
