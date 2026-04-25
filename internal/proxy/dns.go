@@ -20,6 +20,18 @@ func UpdateBlockedDomains(newBlocked map[string]bool) {
 	blockedDomains = newBlocked
 }
 
+func isDomainBlocked(domain string, blocked map[string]bool) bool {
+	if blocked[domain] {
+		return true
+	}
+	for d := range blocked {
+		if strings.HasSuffix(domain, "."+d) {
+			return true
+		}
+	}
+	return false
+}
+
 // GetDNSResponse is a testable function that processes DNS requests without binding to a port.
 // It returns the appropriate DNS response based on blocking rules and upstream DNS queries.
 func GetDNSResponse(r *dns.Msg, blockedDomainsList map[string]bool, primaryDNS, backupDNS string) (*dns.Msg, error) {
@@ -34,10 +46,7 @@ func GetDNSResponse(r *dns.Msg, blockedDomainsList map[string]bool, primaryDNS, 
 	q := r.Question[0]
 	domain := strings.TrimSuffix(q.Name, ".")
 
-	// Check if domain is blocked
-	isBlocked := blockedDomainsList[domain]
-
-	if isBlocked && q.Qtype == dns.TypeA {
+	if isDomainBlocked(domain, blockedDomainsList) && q.Qtype == dns.TypeA {
 		rr, _ := dns.NewRR(q.Name + " 60 IN A 0.0.0.0")
 		m.Answer = append(m.Answer, rr)
 		return m, nil
