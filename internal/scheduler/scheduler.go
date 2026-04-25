@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vsangava/distractions-free/internal/config"
@@ -15,7 +16,8 @@ import (
 )
 
 var activeBlocks = make(map[string]bool)
-var lastWarningTime = make(map[string]time.Time) // Track last warning time per domain
+var lastWarningTime = make(map[string]time.Time)
+var lastWarningMu sync.Mutex
 
 // ScriptExecutor interface for testing AppleScript execution
 type ScriptExecutor interface {
@@ -146,19 +148,22 @@ func SetScriptExecutor(executor ScriptExecutor) {
 // This is the testable function that doesn't depend on time.Now().
 func EvaluateRulesAtTime(t time.Time, cfg config.Config) map[string]bool {
 	currentDay := t.Weekday().String()
-	currentTime := t.Format("15:04")
+	now := time.Date(0, 1, 1, t.Hour(), t.Minute(), 0, 0, time.UTC)
 
 	newBlocked := make(map[string]bool)
 
-	// Evaluate times
 	for _, rule := range cfg.Rules {
 		if !rule.IsActive {
 			continue
 		}
 		if slots, exists := rule.Schedules[currentDay]; exists {
 			for _, slot := range slots {
-				// Check active blocks
-				if currentTime >= slot.Start && currentTime < slot.End {
+				slotStart, errS := time.Parse("15:04", slot.Start)
+				slotEnd, errE := time.Parse("15:04", slot.End)
+				if errS != nil || errE != nil {
+					continue
+				}
+				if (now.Equal(slotStart) || now.After(slotStart)) && now.Before(slotEnd) {
 					newBlocked[rule.Domain] = true
 					break
 				}
@@ -223,6 +228,9 @@ func Start() {
 }
 
 func evaluateRules() {
+	if err := config.LoadConfig(); err != nil {
+		log.Printf("Config reload warning: %v", err)
+	}
 	cfg := config.GetConfig()
 	now := time.Now()
 
@@ -230,35 +238,27 @@ func evaluateRules() {
 	warningDomains := CheckWarningDomainsAtTime(now, cfg)
 
 	var newlyBlockedDomains []string
-	requiresFlush := false
-
-	// Check if state changed (domains added or removed)
-	if len(newBlocked) != len(activeBlocks) || len(newlyBlockedDomains) > 0 {
-		for domain := range newBlocked {
-			if !activeBlocks[domain] {
-				newlyBlockedDomains = append(newlyBlockedDomains, domain)
-			}
-		}
-		if len(newlyBlockedDomains) > 0 {
-			requiresFlush = true
+	for domain := range newBlocked {
+		if !activeBlocks[domain] {
+			newlyBlockedDomains = append(newlyBlockedDomains, domain)
 		}
 	}
+	requiresFlush := len(newlyBlockedDomains) > 0 || len(newBlocked) != len(activeBlocks)
 
-	// Apply states
 	activeBlocks = newBlocked
 	proxy.UpdateBlockedDomains(newBlocked)
 
-	// Show warnings only for domains we haven't warned about recently
 	if len(warningDomains) > 0 {
 		var domainsToWarn []string
+		lastWarningMu.Lock()
 		for _, domain := range warningDomains {
-			// Only warn if we haven't warned in the last minute
 			lastTime, exists := lastWarningTime[domain]
 			if !exists || now.Sub(lastTime) >= 1*time.Minute {
 				domainsToWarn = append(domainsToWarn, domain)
 				lastWarningTime[domain] = now
 			}
 		}
+		lastWarningMu.Unlock()
 		if len(domainsToWarn) > 0 {
 			runMacOSWarning(domainsToWarn)
 		}

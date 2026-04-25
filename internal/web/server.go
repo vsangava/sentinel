@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/vsangava/distractions-free/internal/config"
 	"github.com/vsangava/distractions-free/internal/testcli"
@@ -48,6 +49,12 @@ func ValidatePostedConfig(cfg config.Config) error {
 			for _, slot := range slots {
 				if slot.Start == "" || slot.End == "" {
 					return errors.New("schedule timeslot must include start and end")
+				}
+				if _, err := time.Parse("15:04", slot.Start); err != nil {
+					return errors.New("invalid start time (use HH:MM, zero-padded): " + slot.Start)
+				}
+				if _, err := time.Parse("15:04", slot.End); err != nil {
+					return errors.New("invalid end time (use HH:MM, zero-padded): " + slot.End)
 				}
 				if slot.Start >= slot.End {
 					return errors.New("schedule timeslot start time must be before end time")
