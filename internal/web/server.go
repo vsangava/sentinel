@@ -16,6 +16,21 @@ import (
 //go:embed static/*
 var webFiles embed.FS
 
+// authMiddleware rejects requests to /api/* (except GET /api/config) without a valid X-Auth-Token.
+// GET /api/config is intentionally public so the web UI can bootstrap the token on first load.
+func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		cfg := config.GetConfig()
+		if r.Header.Get("X-Auth-Token") != cfg.Settings.AuthToken {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+			return
+		}
+		next(w, r)
+	}
+}
+
 // ConfigHandler is a testable handler that returns the current config as JSON.
 func ConfigHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -161,12 +176,13 @@ func StartWebServer() {
 		log.Fatalf("Failed to load embedded web files: %v", err)
 	}
 
-	http.Handle("/", staticHandler)
-	http.HandleFunc("/api/config", ConfigHandler)
-	http.HandleFunc("/api/test-query", TestQueryHandler)
+	mux := http.NewServeMux()
+	mux.Handle("/", staticHandler)
+	mux.HandleFunc("/api/config", ConfigHandler)
+	mux.HandleFunc("/api/test-query", authMiddleware(TestQueryHandler))
 
 	log.Println("Web server starting on http://localhost:8040")
-	if err := http.ListenAndServe("127.0.0.1:8040", nil); err != nil {
+	if err := http.ListenAndServe("127.0.0.1:8040", mux); err != nil {
 		log.Fatalf("Web server failed: %v", err)
 	}
 }
@@ -182,12 +198,13 @@ func StartTestWebServer() {
 		log.Fatalf("Failed to load embedded web files: %v", err)
 	}
 
-	http.Handle("/", staticHandler)
-	http.HandleFunc("/api/config", ConfigHandler)
-	http.HandleFunc("/api/test-query", TestQueryHandler)
+	mux := http.NewServeMux()
+	mux.Handle("/", staticHandler)
+	mux.HandleFunc("/api/config", ConfigHandler)
+	mux.HandleFunc("/api/test-query", authMiddleware(TestQueryHandler))
 
 	log.Println("Test web server starting on http://localhost:8040")
-	if err := http.ListenAndServe("127.0.0.1:8040", nil); err != nil {
+	if err := http.ListenAndServe("127.0.0.1:8040", mux); err != nil {
 		log.Fatalf("Test web server failed: %v", err)
 	}
 }
