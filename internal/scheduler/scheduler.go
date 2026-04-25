@@ -29,8 +29,11 @@ type ScriptExecutor interface {
 type MacOSScriptExecutor struct{}
 
 func (e *MacOSScriptExecutor) ExecuteScript(script string) error {
-	runAsMacUser(script)
-	return nil // runAsMacUser doesn't return an error, so we assume success
+	if err := runAsMacUser(script); err != nil {
+		log.Printf("AppleScript execution failed: %v", err)
+		return err
+	}
+	return nil
 }
 
 func (e *MacOSScriptExecutor) LogScript(script string) {
@@ -284,21 +287,28 @@ func getMacUser() string {
 	return user
 }
 
-func runAsMacUser(scriptContent string) {
+func runAsMacUser(scriptContent string) error {
 	if runtime.GOOS != "darwin" {
-		return
+		return nil
 	}
 
 	scriptPath := "/tmp/df_script.scpt"
-	os.WriteFile(scriptPath, []byte(scriptContent), 0644)
-
-	user := getMacUser()
-	if user == "" || os.Getuid() != 0 {
-		exec.Command("osascript", scriptPath).Run()
-		return
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0644); err != nil {
+		return fmt.Errorf("write script: %w", err)
 	}
 
-	exec.Command("su", "-", user, "-c", "osascript "+scriptPath).Run()
+	user := getMacUser()
+	var cmd *exec.Cmd
+	if user == "" || os.Getuid() != 0 {
+		cmd = exec.Command("osascript", scriptPath)
+	} else {
+		cmd = exec.Command("su", "-", user, "-c", "osascript "+scriptPath)
+	}
+
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("osascript: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func getOpenBrowserDomains(domains []string) []string {
