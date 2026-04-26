@@ -16,8 +16,10 @@ type TimeSlot struct {
 	End   string `json:"end"`
 }
 
+// Rule binds a named group of domains to a weekly schedule.
+// Group must reference a key in Config.Groups.
 type Rule struct {
-	Domain    string                `json:"domain"`
+	Group     string                `json:"group"`
 	IsActive  bool                  `json:"is_active"`
 	Schedules map[string][]TimeSlot `json:"schedules"`
 }
@@ -47,14 +49,23 @@ type PauseWindow struct {
 }
 
 type Config struct {
-	Settings Settings     `json:"settings"`
-	Rules    []Rule       `json:"rules"`
-	Pause    *PauseWindow `json:"pause,omitempty"`
+	Settings Settings            `json:"settings"`
+	Groups   map[string][]string `json:"groups"`
+	Rules    []Rule              `json:"rules"`
+	Pause    *PauseWindow        `json:"pause,omitempty"`
 }
 
 // IsPaused reports whether all blocking rules are suspended at time t.
 func (c Config) IsPaused(t time.Time) bool {
 	return c.Pause != nil && t.Before(c.Pause.Until)
+}
+
+// ResolveGroup returns the domains in the named group, or nil if the group does not exist.
+func (c Config) ResolveGroup(name string) []string {
+	if c.Groups == nil {
+		return nil
+	}
+	return c.Groups[name]
 }
 
 var (
@@ -171,16 +182,35 @@ func saveDefaultConfig(path string) error {
 			AuthToken:       token,
 			EnforcementMode: "hosts",
 		},
+		Groups: map[string][]string{
+			"games":  {"roblox.com", "epicgames.com", "steampowered.com", "fortnite.com", "minecraft.net"},
+			"social": {"discord.com", "facebook.com", "instagram.com", "tiktok.com", "snapchat.com", "reddit.com"},
+		},
 		Rules: []Rule{
 			{
-				Domain:   "youtube.com",
+				Group:    "games",
 				IsActive: true,
 				Schedules: map[string][]TimeSlot{
-					"Monday":    {{Start: "09:00", End: "17:00"}},
-					"Tuesday":   {{Start: "09:00", End: "17:00"}},
-					"Wednesday": {{Start: "09:00", End: "17:00"}},
-					"Thursday":  {{Start: "09:00", End: "17:00"}},
-					"Friday":    {{Start: "09:00", End: "17:00"}},
+					"Monday":    {{Start: "09:00", End: "15:00"}, {Start: "21:30", End: "23:59"}},
+					"Tuesday":   {{Start: "09:00", End: "15:00"}, {Start: "21:30", End: "23:59"}},
+					"Wednesday": {{Start: "09:00", End: "15:00"}, {Start: "21:30", End: "23:59"}},
+					"Thursday":  {{Start: "09:00", End: "15:00"}, {Start: "21:30", End: "23:59"}},
+					"Friday":    {{Start: "09:00", End: "15:00"}, {Start: "21:30", End: "23:59"}},
+					"Saturday":  {{Start: "21:30", End: "23:59"}},
+					"Sunday":    {{Start: "21:30", End: "23:59"}},
+				},
+			},
+			{
+				Group:    "social",
+				IsActive: true,
+				Schedules: map[string][]TimeSlot{
+					"Monday":    {{Start: "09:00", End: "15:00"}, {Start: "21:30", End: "23:59"}},
+					"Tuesday":   {{Start: "09:00", End: "15:00"}, {Start: "21:30", End: "23:59"}},
+					"Wednesday": {{Start: "09:00", End: "15:00"}, {Start: "21:30", End: "23:59"}},
+					"Thursday":  {{Start: "09:00", End: "15:00"}, {Start: "21:30", End: "23:59"}},
+					"Friday":    {{Start: "09:00", End: "15:00"}, {Start: "21:30", End: "23:59"}},
+					"Saturday":  {{Start: "21:30", End: "23:59"}},
+					"Sunday":    {{Start: "21:30", End: "23:59"}},
 				},
 			},
 		},
