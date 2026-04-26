@@ -186,6 +186,10 @@ func EvaluateRulesAtTime(t time.Time, cfg config.Config) map[string]bool {
 		if !rule.IsActive {
 			continue
 		}
+		domains := cfg.ResolveGroup(rule.Group)
+		if len(domains) == 0 {
+			continue
+		}
 		if slots, exists := rule.Schedules[currentDay]; exists {
 			for _, slot := range slots {
 				slotStart, errS := time.Parse("15:04", slot.Start)
@@ -194,7 +198,9 @@ func EvaluateRulesAtTime(t time.Time, cfg config.Config) map[string]bool {
 					continue
 				}
 				if (now.Equal(slotStart) || now.After(slotStart)) && now.Before(slotEnd) {
-					newBlocked[rule.Domain] = true
+					for _, d := range domains {
+						newBlocked[d] = true
+					}
 					break
 				}
 			}
@@ -217,8 +223,13 @@ func CheckWarningDomainsAtTime(t time.Time, cfg config.Config) []string {
 	var warningDomains []string
 
 	// Check for warnings within 3-minute window before block start
+	seen := make(map[string]bool)
 	for _, rule := range cfg.Rules {
 		if !rule.IsActive {
+			continue
+		}
+		domains := cfg.ResolveGroup(rule.Group)
+		if len(domains) == 0 {
 			continue
 		}
 		if slots, exists := rule.Schedules[currentDay]; exists {
@@ -242,7 +253,12 @@ func CheckWarningDomainsAtTime(t time.Time, cfg config.Config) []string {
 
 				// Warn if current time is within [warningStart, blockTime)
 				if (t.After(warningStart) || t.Equal(warningStart)) && t.Before(blockTime) {
-					warningDomains = append(warningDomains, rule.Domain)
+					for _, d := range domains {
+						if !seen[d] {
+							seen[d] = true
+							warningDomains = append(warningDomains, d)
+						}
+					}
 				}
 			}
 		}
