@@ -1227,9 +1227,7 @@ async function pauseBlocking(minutes) {
         });
         var data = await res.json();
         if (!res.ok) { showBanner('managePauseMsg', 'error', data.error || 'Failed to pause'); return; }
-        var until = new Date(data.paused_until);
-        showBanner('managePauseMsg', 'warning',
-            '⏸ Paused until ' + until.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}));
+        document.getElementById('managePauseMsg').innerHTML = '';
         loadManagePauseState();
     } catch(e) {
         showBanner('managePauseMsg', 'error', 'Error: ' + e.message);
@@ -1244,7 +1242,7 @@ async function resumeBlocking() {
         });
         var data = await res.json();
         if (!res.ok) { showBanner('managePauseMsg', 'error', data.error || 'Failed to resume'); return; }
-        showBanner('managePauseMsg', 'success', '▶ Blocking resumed');
+        document.getElementById('managePauseMsg').innerHTML = '';
         loadManagePauseState();
     } catch(e) {
         showBanner('managePauseMsg', 'error', 'Error: ' + e.message);
