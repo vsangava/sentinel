@@ -68,9 +68,26 @@ func ValidatePostedConfig(cfg config.Config) error {
 		}
 	}
 
+	for groupName, domains := range cfg.Groups {
+		if groupName == "" {
+			return errors.New("group name cannot be empty")
+		}
+		if len(domains) == 0 {
+			return errors.New("group '" + groupName + "' must contain at least one domain")
+		}
+		for _, d := range domains {
+			if d == "" {
+				return errors.New("group '" + groupName + "' contains an empty domain")
+			}
+		}
+	}
+
 	for _, rule := range cfg.Rules {
-		if rule.Domain == "" {
-			return errors.New("rule domain cannot be empty")
+		if rule.Group == "" {
+			return errors.New("rule group cannot be empty")
+		}
+		if _, ok := cfg.Groups[rule.Group]; !ok {
+			return errors.New("rule references unknown group: " + rule.Group)
 		}
 		for day, slots := range rule.Schedules {
 			if !validDays[day] {

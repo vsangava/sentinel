@@ -245,8 +245,8 @@ func TestConfigHandler_RulesStructure(t *testing.T) {
 
 	// If there are rules, verify they have expected fields
 	for _, rule := range cfg.Rules {
-		if rule.Domain == "" {
-			t.Errorf("rule missing Domain field")
+		if rule.Group == "" {
+			t.Errorf("rule missing Group field")
 		}
 
 		if rule.Schedules == nil {
@@ -355,9 +355,10 @@ func TestStatusHandler_UsesPostedConfig(t *testing.T) {
 
 	blocked := config.Config{
 		Settings: config.Settings{PrimaryDNS: "8.8.8.8:53", BackupDNS: "1.1.1.1:53"},
+		Groups:   map[string][]string{"video": {"youtube.com"}},
 		Rules: []config.Rule{
 			{
-				Domain:   "youtube.com",
+				Group:    "video",
 				IsActive: true,
 				Schedules: map[string][]config.TimeSlot{
 					day: {{Start: start, End: end}},
@@ -396,9 +397,10 @@ func TestStatusHandler_UsesPostedConfig(t *testing.T) {
 func TestStatusHandler_EmptyWhenNotBlocked(t *testing.T) {
 	notBlocked := config.Config{
 		Settings: config.Settings{PrimaryDNS: "8.8.8.8:53", BackupDNS: "1.1.1.1:53"},
+		Groups:   map[string][]string{"video": {"youtube.com"}},
 		Rules: []config.Rule{
 			{
-				Domain:   "youtube.com",
+				Group:    "video",
 				IsActive: true,
 				Schedules: map[string][]config.TimeSlot{
 					// Window in the past — never active now

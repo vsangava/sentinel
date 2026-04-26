@@ -7,6 +7,22 @@ import (
 	"github.com/vsangava/distractions-free/internal/config"
 )
 
+// helpers ────────────────────────────────────────────────────────────────────
+
+// singleGroup builds a config with exactly one group containing one domain
+// and one rule that references it. Most tests want this shape.
+func singleGroup(domain string, isActive bool, schedules map[string][]config.TimeSlot) config.Config {
+	groupName := domain
+	return config.Config{
+		Groups: map[string][]string{groupName: {domain}},
+		Rules: []config.Rule{
+			{Group: groupName, IsActive: isActive, Schedules: schedules},
+		},
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 func TestEvaluateRulesAtTime_NoActiveRules(t *testing.T) {
 	cfg := config.Config{
 		Rules: []config.Rule{},
@@ -21,19 +37,9 @@ func TestEvaluateRulesAtTime_NoActiveRules(t *testing.T) {
 }
 
 func TestEvaluateRulesAtTime_InactiveRule(t *testing.T) {
-	cfg := config.Config{
-		Rules: []config.Rule{
-			{
-				Domain:   "youtube.com",
-				IsActive: false,
-				Schedules: map[string][]config.TimeSlot{
-					"Monday": {
-						{Start: "09:00", End: "17:00"},
-					},
-				},
-			},
-		},
-	}
+	cfg := singleGroup("youtube.com", false, map[string][]config.TimeSlot{
+		"Monday": {{Start: "09:00", End: "17:00"}},
+	})
 
 	// Monday 10:30 (should be blocked if rule was active)
 	testTime := time.Date(2024, time.April, 1, 10, 30, 0, 0, time.UTC)
@@ -45,19 +51,9 @@ func TestEvaluateRulesAtTime_InactiveRule(t *testing.T) {
 }
 
 func TestEvaluateRulesAtTime_DomainBlockedDuringSchedule(t *testing.T) {
-	cfg := config.Config{
-		Rules: []config.Rule{
-			{
-				Domain:   "youtube.com",
-				IsActive: true,
-				Schedules: map[string][]config.TimeSlot{
-					"Monday": {
-						{Start: "09:00", End: "17:00"},
-					},
-				},
-			},
-		},
-	}
+	cfg := singleGroup("youtube.com", true, map[string][]config.TimeSlot{
+		"Monday": {{Start: "09:00", End: "17:00"}},
+	})
 
 	// Monday 10:30 (within block time)
 	testTime := time.Date(2024, time.April, 1, 10, 30, 0, 0, time.UTC)
@@ -69,19 +65,9 @@ func TestEvaluateRulesAtTime_DomainBlockedDuringSchedule(t *testing.T) {
 }
 
 func TestEvaluateRulesAtTime_DomainNotBlockedOutsideSchedule(t *testing.T) {
-	cfg := config.Config{
-		Rules: []config.Rule{
-			{
-				Domain:   "youtube.com",
-				IsActive: true,
-				Schedules: map[string][]config.TimeSlot{
-					"Monday": {
-						{Start: "09:00", End: "17:00"},
-					},
-				},
-			},
-		},
-	}
+	cfg := singleGroup("youtube.com", true, map[string][]config.TimeSlot{
+		"Monday": {{Start: "09:00", End: "17:00"}},
+	})
 
 	// Monday 18:30 (after block time)
 	testTime := time.Date(2024, time.April, 1, 18, 30, 0, 0, time.UTC)
@@ -93,19 +79,9 @@ func TestEvaluateRulesAtTime_DomainNotBlockedOutsideSchedule(t *testing.T) {
 }
 
 func TestEvaluateRulesAtTime_DomainNotBlockedWrongDay(t *testing.T) {
-	cfg := config.Config{
-		Rules: []config.Rule{
-			{
-				Domain:   "youtube.com",
-				IsActive: true,
-				Schedules: map[string][]config.TimeSlot{
-					"Monday": {
-						{Start: "09:00", End: "17:00"},
-					},
-				},
-			},
-		},
-	}
+	cfg := singleGroup("youtube.com", true, map[string][]config.TimeSlot{
+		"Monday": {{Start: "09:00", End: "17:00"}},
+	})
 
 	// Tuesday 10:30 (different day, no schedule)
 	testTime := time.Date(2024, time.April, 2, 10, 30, 0, 0, time.UTC)
@@ -117,19 +93,9 @@ func TestEvaluateRulesAtTime_DomainNotBlockedWrongDay(t *testing.T) {
 }
 
 func TestEvaluateRulesAtTime_BlockedAtExactStartTime(t *testing.T) {
-	cfg := config.Config{
-		Rules: []config.Rule{
-			{
-				Domain:   "reddit.com",
-				IsActive: true,
-				Schedules: map[string][]config.TimeSlot{
-					"Wednesday": {
-						{Start: "14:00", End: "15:00"},
-					},
-				},
-			},
-		},
-	}
+	cfg := singleGroup("reddit.com", true, map[string][]config.TimeSlot{
+		"Wednesday": {{Start: "14:00", End: "15:00"}},
+	})
 
 	// Wednesday 14:00 (exact start time)
 	testTime := time.Date(2024, time.April, 3, 14, 0, 0, 0, time.UTC)
@@ -141,19 +107,9 @@ func TestEvaluateRulesAtTime_BlockedAtExactStartTime(t *testing.T) {
 }
 
 func TestEvaluateRulesAtTime_NotBlockedAtExactEndTime(t *testing.T) {
-	cfg := config.Config{
-		Rules: []config.Rule{
-			{
-				Domain:   "twitter.com",
-				IsActive: true,
-				Schedules: map[string][]config.TimeSlot{
-					"Friday": {
-						{Start: "09:00", End: "17:00"},
-					},
-				},
-			},
-		},
-	}
+	cfg := singleGroup("twitter.com", true, map[string][]config.TimeSlot{
+		"Friday": {{Start: "09:00", End: "17:00"}},
+	})
 
 	// Friday 17:00 (exact end time, should NOT be blocked)
 	testTime := time.Date(2024, time.April, 5, 17, 0, 0, 0, time.UTC)
@@ -166,23 +122,28 @@ func TestEvaluateRulesAtTime_NotBlockedAtExactEndTime(t *testing.T) {
 
 func TestEvaluateRulesAtTime_MultipleDomainsMultipleSchedules(t *testing.T) {
 	cfg := config.Config{
+		Groups: map[string][]string{
+			"youtube.com": {"youtube.com"},
+			"reddit.com":  {"reddit.com"},
+			"twitter.com": {"twitter.com"},
+		},
 		Rules: []config.Rule{
 			{
-				Domain:   "youtube.com",
+				Group:    "youtube.com",
 				IsActive: true,
 				Schedules: map[string][]config.TimeSlot{
 					"Monday": {{Start: "09:00", End: "17:00"}},
 				},
 			},
 			{
-				Domain:   "reddit.com",
+				Group:    "reddit.com",
 				IsActive: true,
 				Schedules: map[string][]config.TimeSlot{
 					"Monday": {{Start: "09:00", End: "12:00"}},
 				},
 			},
 			{
-				Domain:   "twitter.com",
+				Group:    "twitter.com",
 				IsActive: true,
 				Schedules: map[string][]config.TimeSlot{
 					"Monday": {{Start: "14:00", End: "17:00"}},
@@ -207,20 +168,12 @@ func TestEvaluateRulesAtTime_MultipleDomainsMultipleSchedules(t *testing.T) {
 }
 
 func TestEvaluateRulesAtTime_MultipleTimeSlotsPerDay(t *testing.T) {
-	cfg := config.Config{
-		Rules: []config.Rule{
-			{
-				Domain:   "youtube.com",
-				IsActive: true,
-				Schedules: map[string][]config.TimeSlot{
-					"Monday": {
-						{Start: "09:00", End: "12:00"},
-						{Start: "14:00", End: "17:00"},
-					},
-				},
-			},
+	cfg := singleGroup("youtube.com", true, map[string][]config.TimeSlot{
+		"Monday": {
+			{Start: "09:00", End: "12:00"},
+			{Start: "14:00", End: "17:00"},
 		},
-	}
+	})
 
 	// Monday 10:30 (first slot)
 	testTime1 := time.Date(2024, time.April, 1, 10, 30, 0, 0, time.UTC)
@@ -244,20 +197,61 @@ func TestEvaluateRulesAtTime_MultipleTimeSlotsPerDay(t *testing.T) {
 	}
 }
 
-func TestCheckWarningDomainsAtTime_WarningTriggersAt3MinBefore(t *testing.T) {
+func TestEvaluateRulesAtTime_GroupExpandsToAllDomains(t *testing.T) {
 	cfg := config.Config{
+		Groups: map[string][]string{
+			"games": {"roblox.com", "fortnite.com", "minecraft.net"},
+		},
 		Rules: []config.Rule{
 			{
-				Domain:   "youtube.com",
+				Group:    "games",
 				IsActive: true,
 				Schedules: map[string][]config.TimeSlot{
-					"Monday": {
-						{Start: "10:00", End: "12:00"},
-					},
+					"Monday": {{Start: "09:00", End: "15:00"}},
 				},
 			},
 		},
 	}
+
+	testTime := time.Date(2024, time.April, 1, 10, 0, 0, 0, time.UTC)
+	result := EvaluateRulesAtTime(testTime, cfg)
+
+	for _, d := range []string{"roblox.com", "fortnite.com", "minecraft.net"} {
+		if !result[d] {
+			t.Errorf("expected %s to be blocked (group expansion)", d)
+		}
+	}
+	if len(result) != 3 {
+		t.Errorf("expected exactly 3 blocked domains, got %d: %v", len(result), result)
+	}
+}
+
+func TestEvaluateRulesAtTime_RuleWithMissingGroupIsSkipped(t *testing.T) {
+	cfg := config.Config{
+		Groups: map[string][]string{}, // intentionally empty
+		Rules: []config.Rule{
+			{
+				Group:    "phantom",
+				IsActive: true,
+				Schedules: map[string][]config.TimeSlot{
+					"Monday": {{Start: "09:00", End: "17:00"}},
+				},
+			},
+		},
+	}
+
+	testTime := time.Date(2024, time.April, 1, 10, 30, 0, 0, time.UTC)
+	result := EvaluateRulesAtTime(testTime, cfg)
+
+	if len(result) != 0 {
+		t.Errorf("expected rule with missing group to be skipped, got %v", result)
+	}
+}
+
+func TestCheckWarningDomainsAtTime_WarningTriggersAt3MinBefore(t *testing.T) {
+	cfg := singleGroup("youtube.com", true, map[string][]config.TimeSlot{
+		"Monday": {{Start: "10:00", End: "12:00"}},
+	})
 
 	// Monday 09:57 (3 minutes before 10:00)
 	testTime := time.Date(2024, time.April, 1, 9, 57, 0, 0, time.UTC)
@@ -272,19 +266,9 @@ func TestCheckWarningDomainsAtTime_WarningTriggersAt3MinBefore(t *testing.T) {
 }
 
 func TestCheckWarningDomainsAtTime_NoWarningOutsideWindow(t *testing.T) {
-	cfg := config.Config{
-		Rules: []config.Rule{
-			{
-				Domain:   "reddit.com",
-				IsActive: true,
-				Schedules: map[string][]config.TimeSlot{
-					"Tuesday": {
-						{Start: "14:00", End: "16:00"},
-					},
-				},
-			},
-		},
-	}
+	cfg := singleGroup("reddit.com", true, map[string][]config.TimeSlot{
+		"Tuesday": {{Start: "14:00", End: "16:00"}},
+	})
 
 	// Tuesday 13:54 (more than 3 minutes before)
 	testTime := time.Date(2024, time.April, 2, 13, 54, 0, 0, time.UTC)
@@ -296,19 +280,9 @@ func TestCheckWarningDomainsAtTime_NoWarningOutsideWindow(t *testing.T) {
 }
 
 func TestCheckWarningDomainsAtTime_NoWarningForInactiveRule(t *testing.T) {
-	cfg := config.Config{
-		Rules: []config.Rule{
-			{
-				Domain:   "twitter.com",
-				IsActive: false,
-				Schedules: map[string][]config.TimeSlot{
-					"Wednesday": {
-						{Start: "11:00", End: "13:00"},
-					},
-				},
-			},
-		},
-	}
+	cfg := singleGroup("twitter.com", false, map[string][]config.TimeSlot{
+		"Wednesday": {{Start: "11:00", End: "13:00"}},
+	})
 
 	// Wednesday 10:57 (3 minutes before, but rule inactive)
 	testTime := time.Date(2024, time.April, 3, 10, 57, 0, 0, time.UTC)
@@ -321,23 +295,23 @@ func TestCheckWarningDomainsAtTime_NoWarningForInactiveRule(t *testing.T) {
 
 func TestCheckWarningDomainsAtTime_MultipleWarnings(t *testing.T) {
 	cfg := config.Config{
+		Groups: map[string][]string{
+			"youtube.com": {"youtube.com"},
+			"reddit.com":  {"reddit.com"},
+		},
 		Rules: []config.Rule{
 			{
-				Domain:   "youtube.com",
+				Group:    "youtube.com",
 				IsActive: true,
 				Schedules: map[string][]config.TimeSlot{
-					"Thursday": {
-						{Start: "09:00", End: "10:00"},
-					},
+					"Thursday": {{Start: "09:00", End: "10:00"}},
 				},
 			},
 			{
-				Domain:   "reddit.com",
+				Group:    "reddit.com",
 				IsActive: true,
 				Schedules: map[string][]config.TimeSlot{
-					"Thursday": {
-						{Start: "09:00", End: "10:00"},
-					},
+					"Thursday": {{Start: "09:00", End: "10:00"}},
 				},
 			},
 		},
@@ -352,20 +326,34 @@ func TestCheckWarningDomainsAtTime_MultipleWarnings(t *testing.T) {
 	}
 }
 
-func TestCheckWarningDomainsAtTime_WarningTriggersAtEveryMinute(t *testing.T) {
+func TestCheckWarningDomainsAtTime_GroupExpandsToAllDomains(t *testing.T) {
 	cfg := config.Config{
+		Groups: map[string][]string{
+			"games": {"roblox.com", "fortnite.com"},
+		},
 		Rules: []config.Rule{
 			{
-				Domain:   "facebook.com",
+				Group:    "games",
 				IsActive: true,
 				Schedules: map[string][]config.TimeSlot{
-					"Monday": {
-						{Start: "10:00", End: "12:00"},
-					},
+					"Monday": {{Start: "10:00", End: "12:00"}},
 				},
 			},
 		},
 	}
+
+	testTime := time.Date(2024, time.April, 1, 9, 57, 0, 0, time.UTC)
+	warnings := CheckWarningDomainsAtTime(testTime, cfg)
+
+	if len(warnings) != 2 {
+		t.Errorf("expected 2 warning domains from group, got %d: %v", len(warnings), warnings)
+	}
+}
+
+func TestCheckWarningDomainsAtTime_WarningTriggersAtEveryMinute(t *testing.T) {
+	cfg := singleGroup("facebook.com", true, map[string][]config.TimeSlot{
+		"Monday": {{Start: "10:00", End: "12:00"}},
+	})
 
 	testCases := []struct {
 		name        string
@@ -448,19 +436,9 @@ func TestEvaluateRulesAtTime_AllWeekdaySchedules(t *testing.T) {
 	}
 
 	for _, wd := range weekdays {
-		cfg := config.Config{
-			Rules: []config.Rule{
-				{
-					Domain:   "youtube.com",
-					IsActive: true,
-					Schedules: map[string][]config.TimeSlot{
-						wd.day: {
-							{Start: "09:00", End: "17:00"},
-						},
-					},
-				},
-			},
-		}
+		cfg := singleGroup("youtube.com", true, map[string][]config.TimeSlot{
+			wd.day: {{Start: "09:00", End: "17:00"}},
+		})
 
 		testTime := time.Date(2024, time.April, wd.dayOfWeek, 10, 0, 0, 0, time.UTC)
 		result := EvaluateRulesAtTime(testTime, cfg)
@@ -472,19 +450,9 @@ func TestEvaluateRulesAtTime_AllWeekdaySchedules(t *testing.T) {
 }
 
 func TestEvaluateRulesAtTime_EdgeCaseMinuteBefore(t *testing.T) {
-	cfg := config.Config{
-		Rules: []config.Rule{
-			{
-				Domain:   "youtube.com",
-				IsActive: true,
-				Schedules: map[string][]config.TimeSlot{
-					"Monday": {
-						{Start: "10:00", End: "11:00"},
-					},
-				},
-			},
-		},
-	}
+	cfg := singleGroup("youtube.com", true, map[string][]config.TimeSlot{
+		"Monday": {{Start: "10:00", End: "11:00"}},
+	})
 
 	// Monday 09:59 (1 minute before start)
 	testTime := time.Date(2024, time.April, 1, 9, 59, 0, 0, time.UTC)
@@ -496,19 +464,9 @@ func TestEvaluateRulesAtTime_EdgeCaseMinuteBefore(t *testing.T) {
 }
 
 func TestEvaluateRulesAtTime_EdgeCaseMinuteAfterEnd(t *testing.T) {
-	cfg := config.Config{
-		Rules: []config.Rule{
-			{
-				Domain:   "reddit.com",
-				IsActive: true,
-				Schedules: map[string][]config.TimeSlot{
-					"Friday": {
-						{Start: "14:00", End: "15:00"},
-					},
-				},
-			},
-		},
-	}
+	cfg := singleGroup("reddit.com", true, map[string][]config.TimeSlot{
+		"Friday": {{Start: "14:00", End: "15:00"}},
+	})
 
 	// Friday 15:01 (1 minute after end)
 	testTime := time.Date(2024, time.April, 5, 15, 1, 0, 0, time.UTC)
