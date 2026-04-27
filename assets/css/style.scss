@@ -18,3 +18,9 @@ th                                 { border-bottom-color: $blue; }
 hr                                 { border-bottom-color: $blue; color: $blue; }
 a                                  { color: darken($blue, 10%); }
 a:hover                            { color: $blue; }
+
+.site-logo {
+  display: block;
+  width: 96px;
+  margin: 0 auto 12px;
+}
