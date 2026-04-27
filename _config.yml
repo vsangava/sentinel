@@ -1,3 +1,3 @@
 theme: jekyll-theme-hacker
 title: Distractions-Free
-description: A system-level focus daemon for macOS and Windows that enforces productivity schedules by blocking distracting domains at the OS layer.
+description: Block distracting websites on a schedule — for yourself or your family. Works at the OS level; requires admin credentials to disable.
