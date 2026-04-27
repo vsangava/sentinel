@@ -1,4 +1,4 @@
-# Distractions-Free — System Design
+# Sentinel — System Design
 
 This document describes how the daemon is built. It complements [README.md](./README.md), which is the user-facing guide, and [TROUBLESHOOTING.md](./TROUBLESHOOTING.md), which covers diagnostics and recovery.
 
@@ -24,7 +24,7 @@ This document describes how the daemon is built. It complements [README.md](./RE
 
 ## 1. Overview
 
-Distractions-Free is a single-binary Go daemon that runs as a privileged system service. It enforces per-time-of-day blocking rules on the host — each rule binds a named group of domains (e.g. `games`, `social`) to a weekly schedule — so distracting sites become unreachable during configured windows.
+Sentinel is a single-binary Go daemon that runs as a privileged system service. It enforces per-time-of-day blocking rules on the host — each rule binds a named group of domains (e.g. `games`, `social`) to a weekly schedule — so distracting sites become unreachable during configured windows.
 
 The interesting design decisions:
 
@@ -105,7 +105,7 @@ The interesting design decisions:
 
 **`dns` mode:** the OS is configured to use `127.0.0.1:53` as its resolver. Each query is checked against the in-memory `blocked` map. Blocked A-record queries return `0.0.0.0`; everything else is forwarded to the upstream resolver (with backup-DNS failover).
 
-**`strict` mode:** like `dns`, plus the scheduler asks the pf enforcer to resolve each newly-blocked domain to A/AAAA addresses and load them into a `<blocked_ips>` table inside the `distractions-free` pf anchor. Outbound packets to those IPs are dropped at the kernel.
+**`strict` mode:** like `dns`, plus the scheduler asks the pf enforcer to resolve each newly-blocked domain to A/AAAA addresses and load them into a `<blocked_ips>` table inside the `sentinel` pf anchor. Outbound packets to those IPs are dropped at the kernel.
 
 ---
 
@@ -178,13 +178,13 @@ func New(cfg config.Config) Enforcer {
 Edits `/etc/hosts` (or `C:\Windows\System32\drivers\etc\hosts`) between marker lines:
 
 ```
-# distractions-free:begin
+# sentinel:begin
 0.0.0.0 youtube.com
 0.0.0.0 www.youtube.com
 0.0.0.0 m.youtube.com
 0.0.0.0 mobile.youtube.com
 0.0.0.0 app.youtube.com
-# distractions-free:end
+# sentinel:end
 ```
 
 Subdomain prefixes are hardcoded: `["", "www.", "m.", "mobile.", "app."]`. There is no wildcard support in `/etc/hosts`, so this is a deliberate, conservative list. Adding more would inflate the hosts file for marginal benefit.
@@ -365,7 +365,7 @@ This function is what the test suite hits — no port binding, no global state, 
 
 ### Anchor file model
 
-The daemon owns one pf anchor named `distractions-free`, stored at `/etc/pf.anchors/distractions-free`. The anchor file content is regenerated on every Activate:
+The daemon owns one pf anchor named `sentinel`, stored at `/etc/pf.anchors/sentinel`. The anchor file content is regenerated on every Activate:
 
 ```
 table <blocked_ips> persist {
@@ -379,19 +379,19 @@ block drop out quick proto {tcp udp} from any to <blocked_ips>
 The anchor is wired into `/etc/pf.conf` between marker lines:
 
 ```
-# distractions-free:begin
-anchor "distractions-free"
-load anchor "distractions-free" from "/etc/pf.anchors/distractions-free"
-# distractions-free:end
+# sentinel:begin
+anchor "sentinel"
+load anchor "sentinel" from "/etc/pf.anchors/sentinel"
+# sentinel:end
 ```
 
 `InstallAnchor()` writes a stub anchor file, injects the pf.conf block (idempotent — checks for the marker first), runs `pfctl -n -f /etc/pf.conf` to validate the config in dry-run mode, then `pfctl -f /etc/pf.conf` to load it, and finally `pfctl -e` to enable pf if it isn't already.
 
 `RemoveAnchor()` flushes the table, strips the marker block from pf.conf, reloads pf, and deletes the anchor file.
 
-`ActivateBlock(domains, primaryDNS)` resolves each domain to A and AAAA addresses (via `miekg/dns`, falling back to `net.LookupHost`), regenerates the anchor file, runs `pfctl -a distractions-free -f <anchor>` to load it, and then runs `pfctl -k <src> -k <ip>` per IP to kill any existing connections.
+`ActivateBlock(domains, primaryDNS)` resolves each domain to A and AAAA addresses (via `miekg/dns`, falling back to `net.LookupHost`), regenerates the anchor file, runs `pfctl -a sentinel -f <anchor>` to load it, and then runs `pfctl -k <src> -k <ip>` per IP to kill any existing connections.
 
-`DeactivateBlock()` flushes the table via `pfctl -a distractions-free -t blocked_ips -T flush`, tolerating "No such table" since the table may not exist on first run.
+`DeactivateBlock()` flushes the table via `pfctl -a sentinel -t blocked_ips -T flush`, tolerating "No such table" since the table may not exist on first run.
 
 ### Why preview functions are exported
 
@@ -448,8 +448,8 @@ A rule used to carry a single `Domain` string, which meant blocking five gaming 
 
 | OS | Path |
 |---|---|
-| macOS | `/Library/Application Support/DistractionsFree/config.json` |
-| Windows | `%PROGRAMDATA%\DistractionsFree\config.json` |
+| macOS | `/Library/Application Support/Sentinel/config.json` |
+| Windows | `%PROGRAMDATA%\Sentinel\config.json` |
 | Linux | `/etc/distractionsfree/config.json` |
 | `UseLocalConfig=true` | `./config.json` |
 
@@ -598,7 +598,7 @@ func (p *program) Stop(s service.Service) error {
 
 ## 11. Cleanup (`--clean`)
 
-`internal/cleanup/cleanup.go` plus `priv_unix.go` / `priv_windows.go`. The forensic recovery path: undo every system change distractions-free might have made, even if the service crashed mid-write.
+`internal/cleanup/cleanup.go` plus `priv_unix.go` / `priv_windows.go`. The forensic recovery path: undo every system change sentinel might have made, even if the service crashed mid-write.
 
 Each cleanup action is a `Step` with a status (`done`/`skipped`/`warn`/`error`) and an optional `Critical` flag. The summary is printed line-by-line at the end. Critical failures cause a non-zero exit code.
 
@@ -686,13 +686,13 @@ The hot path is the per-DNS-query read of `proxy.blockedDomains`; that's why it'
 
 ## 14. Security model
 
-Distractions-Free is **not** a security tool. It's a friction tool against your own future self. Treat it accordingly:
+Sentinel is **not** a security tool. It's a friction tool against your own future self. Treat it accordingly:
 
 - The dashboard binds `127.0.0.1` only. Network attackers cannot reach `:8040`.
 - The auth token in `X-Auth-Token` keeps random local processes from poking the API by accident, but anything running as your user can read `config.json` and impersonate the dashboard. Same for the PIN — it's client-side only.
 - The Manage-tab PIN is not a password. It's a friction layer designed to make you pause and think before disabling your own focus rules. Trivially bypassed by anyone who reads the JS.
 - The service runs as root (macOS launchd daemon, Windows Service). Anything that compromises the binary inherits root. Build releases via the GitHub Actions workflow; don't run a binary you didn't compile or download from a release tag.
-- `/etc/hosts` and `/etc/pf.conf` edits use atomic temp-file + rename. A crash mid-write cannot corrupt the file. Markers (`# distractions-free:begin`/`:end`) mean other tools that respect them won't trample our entries.
+- `/etc/hosts` and `/etc/pf.conf` edits use atomic temp-file + rename. A crash mid-write cannot corrupt the file. Markers (`# sentinel:begin`/`:end`) mean other tools that respect them won't trample our entries.
 - The `--clean` command is the canonical recovery path. It iterates every interface, does not assume a happy-path service stop succeeded, and exits non-zero if any critical step fails.
 
 ---
@@ -701,7 +701,7 @@ Distractions-Free is **not** a security tool. It's a friction tool against your 
 
 ### macOS
 
-- Service framework: `launchd`. The `kardianos/service` library writes a plist to `~/Library/LaunchAgents/com.github.distractions-free.plist` (or system equivalent depending on install context).
+- Service framework: `launchd`. The `kardianos/service` library writes a plist to `~/Library/LaunchAgents/com.github.sentinel.plist` (or system equivalent depending on install context).
 - `osascript` is invoked as the console user (resolved via `stat -f %Su /dev/console`) so notifications appear in the user's UI session and AppleScript can talk to Chrome/Safari. Running `osascript` as root produces a notification nobody can see.
 - `networksetup` is the only supported way to set system DNS — there's no clean API.
 - `dscacheutil -flushcache` + `killall -HUP mDNSResponder` is the canonical cache-flush incantation. Both are needed.

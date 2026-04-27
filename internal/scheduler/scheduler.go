@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vsangava/distractions-free/internal/config"
-	"github.com/vsangava/distractions-free/internal/enforcer"
+	"github.com/vsangava/sentinel/internal/config"
+	"github.com/vsangava/sentinel/internal/enforcer"
 )
 
 var activeBlocks = make(map[string]bool)
@@ -80,7 +80,7 @@ type MacOSAppleScriptGenerator struct{}
 
 func (g *MacOSAppleScriptGenerator) GenerateWarningScript(domains []string) string {
 	msg := fmt.Sprintf("Tabs for %s will close in 3 minutes.", strings.Join(domains, ", "))
-	return fmt.Sprintf(`display notification "%s" with title "Distractions-Free" subtitle "Upcoming Block" sound name "Basso"`, msg)
+	return fmt.Sprintf(`display notification "%s" with title "Sentinel" subtitle "Upcoming Block" sound name "Basso"`, msg)
 }
 
 func (g *MacOSAppleScriptGenerator) GenerateCloseTabsScript(domains []string) string {

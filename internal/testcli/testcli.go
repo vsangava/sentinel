@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
-	"github.com/vsangava/distractions-free/internal/config"
-	"github.com/vsangava/distractions-free/internal/proxy"
-	"github.com/vsangava/distractions-free/internal/scheduler"
+	"github.com/vsangava/sentinel/internal/config"
+	"github.com/vsangava/sentinel/internal/proxy"
+	"github.com/vsangava/sentinel/internal/scheduler"
 )
 
 const timeFormat = "2006-01-02 15:04"

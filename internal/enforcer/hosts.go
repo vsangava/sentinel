@@ -8,12 +8,12 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/vsangava/distractions-free/internal/config"
+	"github.com/vsangava/sentinel/internal/config"
 )
 
 const (
-	blockBegin = "# distractions-free:begin"
-	blockEnd   = "# distractions-free:end"
+	blockBegin = "# sentinel:begin"
+	blockEnd   = "# sentinel:end"
 	blockingIP = "0.0.0.0"
 )
 

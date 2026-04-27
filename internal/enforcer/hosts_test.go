@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vsangava/distractions-free/internal/config"
+	"github.com/vsangava/sentinel/internal/config"
 )
 
 func testHostsConfig() config.Config {

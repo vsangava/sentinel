@@ -79,11 +79,11 @@ func GetConfigFilePath() (string, error) {
 	if UseLocalConfig {
 		dir = "."
 	} else if runtime.GOOS == "darwin" {
-		dir = "/Library/Application Support/DistractionsFree"
+		dir = "/Library/Application Support/Sentinel"
 	} else if runtime.GOOS == "windows" {
-		dir = filepath.Join(os.Getenv("PROGRAMDATA"), "DistractionsFree")
+		dir = filepath.Join(os.Getenv("PROGRAMDATA"), "Sentinel")
 	} else {
-		dir = "/etc/distractionsfree"
+		dir = "/etc/sentinel"
 	}
 	if dir != "." {
 		if err := os.MkdirAll(dir, 0755); err != nil {
@@ -232,10 +232,10 @@ func ConfigDir() string {
 	}
 	switch runtime.GOOS {
 	case "darwin":
-		return "/Library/Application Support/DistractionsFree"
+		return "/Library/Application Support/Sentinel"
 	case "windows":
-		return filepath.Join(os.Getenv("PROGRAMDATA"), "DistractionsFree")
+		return filepath.Join(os.Getenv("PROGRAMDATA"), "Sentinel")
 	default:
-		return "/etc/distractionsfree"
+		return "/etc/sentinel"
 	}
 }

@@ -1,10 +1,10 @@
 .PHONY: help build build-all test clean release check-release
 
 VERSION ?= dev
-BINARY_NAME := distractions-free
+BINARY_NAME := sentinel
 
 help:
-	@echo "📦 Distractions-Free Build Commands"
+	@echo "📦 Sentinel Build Commands"
 	@echo ""
 	@echo "Usage: make [target]"
 	@echo ""

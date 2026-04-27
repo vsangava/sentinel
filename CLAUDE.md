@@ -70,7 +70,7 @@ AppleScript execution uses `AppleScriptGenerator` and `ScriptExecutor` interface
 
 | OS | Path |
 |---|---|
-| macOS (service) | `/Library/Application Support/DistractionsFree/config.json` |
+| macOS (service) | `/Library/Application Support/Sentinel/config.json` |
 | `--no-service` | `./config.json` (working directory) |
 
 Config is re-read every scheduler tick — live edits take effect within 60 seconds, no restart needed.

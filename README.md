@@ -2,11 +2,11 @@
 
 *Your schedule. Enforced.*
 
-[![Latest Release](https://img.shields.io/github/v/release/vsangava/distractions-free?label=release)](https://github.com/vsangava/distractions-free/releases/latest)
-[![Release Date](https://img.shields.io/github/release-date/vsangava/distractions-free)](https://github.com/vsangava/distractions-free/releases/latest)
-[![Build](https://img.shields.io/github/actions/workflow/status/vsangava/distractions-free/ci.yml?branch=main&label=build)](https://github.com/vsangava/distractions-free/actions/workflows/ci.yml)
+[![Latest Release](https://img.shields.io/github/v/release/vsangava/sentinel?label=release)](https://github.com/vsangava/sentinel/releases/latest)
+[![Release Date](https://img.shields.io/github/release-date/vsangava/sentinel)](https://github.com/vsangava/sentinel/releases/latest)
+[![Build](https://img.shields.io/github/actions/workflow/status/vsangava/sentinel/ci.yml?branch=main&label=build)](https://github.com/vsangava/sentinel/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/go-1.26.2-00ADD8?logo=go&logoColor=white)](https://go.dev/)
-[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)](https://github.com/vsangava/distractions-free/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)](https://github.com/vsangava/sentinel/releases/latest)
 
 Sentinel lets you set a schedule for the websites that are hardest to resist — social media, gaming, streaming — and enforces it without giving you (or anyone else) an easy way out. It runs silently in the background as a system service. Turning it off requires your admin password.
 
@@ -71,24 +71,24 @@ Browser extensions are easy to bypass — one click to disable, and kids know it
 
 ### 1. Download the binary
 
-**[→ Download from the latest release](https://github.com/vsangava/distractions-free/releases/latest)**
+**[→ Download from the latest release](https://github.com/vsangava/sentinel/releases/latest)**
 
 | Platform | File |
 |---|---|
-| macOS Apple Silicon | `distractions-free-macos-arm64` |
-| macOS Intel | `distractions-free-macos-amd64` |
-| Windows x86_64 | `distractions-free-windows-amd64.exe` |
+| macOS Apple Silicon | `sentinel-macos-arm64` |
+| macOS Intel | `sentinel-macos-amd64` |
+| Windows x86_64 | `sentinel-windows-amd64.exe` |
 
 On macOS, make it executable after downloading:
 ```bash
-chmod +x distractions-free-macos-*
+chmod +x sentinel-macos-*
 ```
 
 ### 2. Install and start the service
 
 ```bash
-sudo ./distractions-free install
-sudo ./distractions-free start
+sudo ./sentinel install
+sudo ./sentinel start
 ```
 
 That's it for most users. The service starts at login from this point on.
@@ -149,8 +149,8 @@ The daemon reads its configuration from a single JSON file:
 
 | OS | Path |
 |---|---|
-| macOS (service) | `/Library/Application Support/DistractionsFree/config.json` |
-| Windows (service) | `%PROGRAMDATA%\DistractionsFree\config.json` |
+| macOS (service) | `/Library/Application Support/Sentinel/config.json` |
+| Windows (service) | `%PROGRAMDATA%\Sentinel\config.json` |
 | Any (`--no-service`) | `./config.json` (working directory) |
 
 The file is created with defaults on first launch. The scheduler reloads it every minute — live edits take effect on the next tick, no restart required.
@@ -243,7 +243,7 @@ The default is `"hosts"`. Most users should leave it that way.
 
 ### `hosts` (default)
 
-Edits `/etc/hosts` (macOS) or `C:\Windows\System32\drivers\etc\hosts` (Windows). Blocked entries live between marker lines (`# distractions-free:begin` / `# distractions-free:end`) and are atomically rewritten — a crash mid-write cannot corrupt the file. Other entries are never touched.
+Edits `/etc/hosts` (macOS) or `C:\Windows\System32\drivers\etc\hosts` (Windows). Blocked entries live between marker lines (`# sentinel:begin` / `# sentinel:end`) and are atomically rewritten — a crash mid-write cannot corrupt the file. Other entries are never touched.
 
 **Best for:** most users. No port binding, no DNS reconfiguration, works in every browser and app.
 
@@ -270,8 +270,8 @@ Like `dns`, plus a `pf` (Packet Filter) anchor on macOS that drops outbound pack
 Edit `enforcement_mode` in `config.json` and restart the service, or use the shorthand:
 
 ```bash
-sudo ./distractions-free --strict   # writes "strict" to config and exits
-sudo ./distractions-free start      # restart to pick it up
+sudo ./sentinel --strict   # writes "strict" to config and exits
+sudo ./sentinel start      # restart to pick it up
 ```
 
 ---
@@ -281,16 +281,16 @@ sudo ./distractions-free start      # restart to pick it up
 The all-in-one `--clean` command undoes every system change the daemon made: stops the service, removes hosts entries, removes the pf anchor, resets DNS on every interface pointing at `127.0.0.1`, flushes the resolver cache, unregisters the service, removes the config directory, and verifies port 53 is free.
 
 ```bash
-sudo ./distractions-free --clean          # asks before deleting config
-sudo ./distractions-free --clean --yes    # deletes config without asking
+sudo ./sentinel --clean          # asks before deleting config
+sudo ./sentinel --clean --yes    # deletes config without asking
 ```
 
 If you'd rather drive the steps yourself:
 
 ```bash
-sudo ./distractions-free stop        # restores DNS/hosts changes
-sudo ./distractions-free uninstall   # removes the service registration
-sudo rm -rf "/Library/Application Support/DistractionsFree"
+sudo ./sentinel stop        # restores DNS/hosts changes
+sudo ./sentinel uninstall   # removes the service registration
+sudo rm -rf "/Library/Application Support/Sentinel"
 ```
 
 > ⚠️ In `dns`/`strict` mode, do not delete the binary while the service is running with system DNS pointed at `127.0.0.1`, or the machine will lose name resolution. `--clean` handles this correctly; manual removal does not.
@@ -300,9 +300,9 @@ sudo rm -rf "/Library/Application Support/DistractionsFree"
 ## Command-line reference
 
 ```
-distractions-free <subcommand>           # service management
-distractions-free [--flag]               # local / test mode
-sudo distractions-free --clean [--yes]   # forensic uninstall
+sentinel <subcommand>           # service management
+sentinel [--flag]               # local / test mode
+sudo sentinel --clean [--yes]   # forensic uninstall
 ```
 
 | Command / flag | Privileges | What it does | More |
@@ -344,8 +344,8 @@ All endpoints listen on `127.0.0.1:8040`. Every endpoint except the first requir
 Requires Go 1.21+ (the release pipeline uses 1.26.2).
 
 ```bash
-git clone https://github.com/vsangava/distractions-free.git
-cd distractions-free
+git clone https://github.com/vsangava/sentinel.git
+cd sentinel
 
 make build         # current OS only
 make build-all     # macOS arm64 + amd64 + Windows amd64
@@ -353,7 +353,7 @@ make build-all     # macOS arm64 + amd64 + Windows amd64
 
 | Target | What it does |
 |---|---|
-| `make build` | Build for current OS into `./distractions-free` |
+| `make build` | Build for current OS into `./sentinel` |
 | `make build-all` | Cross-compile macOS arm64, macOS amd64, and Windows amd64 |
 | `make test` | `go test ./...` |
 | `make release` | `test` + `build-all` + `verify-binaries` (pre-release sanity check) |
@@ -388,7 +388,7 @@ Three flags let you exercise the daemon without installing it as a service:
 ### `--test-query "<time>" <domain>`
 
 ```bash
-./distractions-free --test-query "2024-04-01 10:30" youtube.com
+./sentinel --test-query "2024-04-01 10:30" youtube.com
 ```
 
 Prints whether the domain would be blocked at that moment, the matching rule(s), and whether a 3-minute warning would fire. Uses `./config.json`. Time format: `YYYY-MM-DD HH:MM` (24-hour).
@@ -396,7 +396,7 @@ Prints whether the domain would be blocked at that moment, the matching rule(s),
 ### `--test-web`
 
 ```bash
-./distractions-free --test-web
+./sentinel --test-web
 # open http://localhost:8040
 ```
 
@@ -405,7 +405,7 @@ Runs the full dashboard against `./config.json` without installing the service. 
 ### `--test-applescript`
 
 ```bash
-./distractions-free --test-applescript
+./sentinel --test-applescript
 ```
 
 Generates the AppleScript used by the tab-closer and optionally executes it. macOS only. Test domains: `facebook.com` (close), `reddit.com` and `roblox.com` (warning — only fires if a tab is open).

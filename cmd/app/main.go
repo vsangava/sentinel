@@ -8,13 +8,13 @@ import (
 	"time"
 
 	"github.com/kardianos/service"
-	"github.com/vsangava/distractions-free/internal/cleanup"
-	"github.com/vsangava/distractions-free/internal/config"
-	"github.com/vsangava/distractions-free/internal/enforcer"
-	"github.com/vsangava/distractions-free/internal/proxy"
-	"github.com/vsangava/distractions-free/internal/scheduler"
-	"github.com/vsangava/distractions-free/internal/testcli"
-	"github.com/vsangava/distractions-free/internal/web"
+	"github.com/vsangava/sentinel/internal/cleanup"
+	"github.com/vsangava/sentinel/internal/config"
+	"github.com/vsangava/sentinel/internal/enforcer"
+	"github.com/vsangava/sentinel/internal/proxy"
+	"github.com/vsangava/sentinel/internal/scheduler"
+	"github.com/vsangava/sentinel/internal/testcli"
+	"github.com/vsangava/sentinel/internal/web"
 )
 
 func testAppleScript() {
@@ -39,7 +39,7 @@ func testAppleScript() {
 		warningScript := ""
 		openWarningDomains := scheduler.GetOpenBrowserDomains(warningDomains)
 		if len(openWarningDomains) > 0 {
-			warningScript = fmt.Sprintf(`display alert "Distractions-Free" message "Tabs for %s will close in 3 minutes." buttons {"OK"} giving up after 15`, strings.Join(openWarningDomains, ", "))
+			warningScript = fmt.Sprintf(`display alert "Sentinel" message "Tabs for %s will close in 3 minutes." buttons {"OK"} giving up after 15`, strings.Join(openWarningDomains, ", "))
 			log.Println("Executing warning script...")
 			if err := scheduler.GetScriptExecutor().ExecuteScript(warningScript); err != nil {
 				log.Printf("Warning script execution failed: %v", err)
@@ -107,17 +107,17 @@ func (p *program) Stop(s service.Service) error {
 }
 
 var svcConfig = &service.Config{
-	Name:        "DistractionsFree",
-	DisplayName: "Distractions Free DNS Proxy",
+	Name:        "Sentinel",
+	DisplayName: "Sentinel DNS Proxy",
 	Description: "Local DNS proxy for blocking distractions.",
 }
 
 func runClean(yes bool) {
 	if !cleanup.IsPrivileged() {
-		log.Fatal("--clean requires root/admin privileges. Run with: sudo ./distractions-free --clean")
+		log.Fatal("--clean requires root/admin privileges. Run with: sudo ./sentinel --clean")
 	}
 
-	fmt.Println("Cleaning all distractions-free system changes...")
+	fmt.Println("Cleaning all sentinel system changes...")
 	fmt.Println()
 
 	var steps []cleanup.Step
@@ -150,7 +150,7 @@ func runClean(yes bool) {
 	// Step 2 — Reset DNS on all network interfaces that point at 127.0.0.1.
 	addSteps(cleanup.ResetAllDNSInterfaces())
 
-	// Step 3 — Remove distractions-free managed block from /etc/hosts.
+	// Step 3 — Remove sentinel managed block from /etc/hosts.
 	addStep(cleanup.CleanHostsFile())
 
 	// Step 4 — Remove pf anchor from /etc/pf.conf (macOS strict mode).
@@ -187,12 +187,12 @@ func runClean(yes bool) {
 		fmt.Println("Some critical steps failed. Review the output above.")
 		os.Exit(1)
 	}
-	fmt.Println("System is clean. distractions-free has been fully removed.")
+	fmt.Println("System is clean. sentinel has been fully removed.")
 }
 
 func main() {
-	// --clean safely removes all system-level changes made by distractions-free.
-	// Usage: sudo ./distractions-free --clean [--yes]
+	// --clean safely removes all system-level changes made by sentinel.
+	// Usage: sudo ./sentinel --clean [--yes]
 	if len(os.Args) > 1 && os.Args[1] == "--clean" {
 		yes := len(os.Args) > 2 && os.Args[2] == "--yes"
 		runClean(yes)
@@ -243,8 +243,8 @@ func main() {
 	}
 
 	// --strict sets enforcement_mode to "strict" in config and exits.
-	// Usage: sudo ./distractions-free --strict
-	//        sudo ./distractions-free install && sudo ./distractions-free start
+	// Usage: sudo ./sentinel --strict
+	//        sudo ./sentinel install && sudo ./sentinel start
 	if len(os.Args) > 1 && os.Args[1] == "--strict" {
 		if err := config.LoadConfig(); err != nil {
 			log.Printf("Config warning (will use defaults): %v", err)
