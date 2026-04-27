@@ -1,6 +1,6 @@
-# Distractions-Free
+# Sentinel
 
-*Block the websites that waste your time — or your children's. On a schedule. No off switch.*
+*Your schedule. Enforced.*
 
 [![Latest Release](https://img.shields.io/github/v/release/vsangava/distractions-free?label=release)](https://github.com/vsangava/distractions-free/releases/latest)
 [![Release Date](https://img.shields.io/github/release-date/vsangava/distractions-free)](https://github.com/vsangava/distractions-free/releases/latest)
@@ -8,13 +8,13 @@
 [![Go](https://img.shields.io/badge/go-1.26.2-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)](https://github.com/vsangava/distractions-free/releases/latest)
 
-Distractions-Free lets you set a schedule for the websites that are hardest to resist — social media, gaming, streaming — and enforces it without giving you (or anyone else) an easy way out. It runs silently in the background as a system service. Turning it off requires your admin password.
+Sentinel lets you set a schedule for the websites that are hardest to resist — social media, gaming, streaming — and enforces it without giving you (or anyone else) an easy way out. It runs silently in the background as a system service. Turning it off requires your admin password.
 
 It works across every browser and every app, not just the one you happen to have open. There's no extension to disable, no toggle to flick.
 
 ## Why not a browser extension?
 
-Browser extensions are easy to bypass — one click to disable, and kids know it. Distractions-Free works at the operating system level: it rewrites the system hosts file (or runs a local DNS resolver in advanced mode), so blocked sites don't load anywhere on the machine, in any browser or app. Getting around it requires admin credentials.
+Browser extensions are easy to bypass — one click to disable, and kids know it. Sentinel works at the operating system level: it rewrites the system hosts file (or runs a local DNS resolver in advanced mode), so blocked sites don't load anywhere on the machine, in any browser or app. Getting around it requires admin credentials.
 
 ---
 
