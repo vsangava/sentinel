@@ -23,7 +23,7 @@ If you removed or stopped the service while it was in `dns` or `strict` mode and
 **Fix it in one command (requires sudo):**
 
 ```bash
-sudo ./distractions-free --clean --yes
+sudo ./sentinel --clean --yes
 ```
 
 That iterates every network interface, resets the ones pointing at `127.0.0.1`, flushes the resolver cache, and verifies port 53 is free. It also handles the case where you've already deleted the binary's config dir.
@@ -71,7 +71,7 @@ ipconfig /flushdns
 
 ```bash
 # Service registered & running?
-sudo ./distractions-free status
+sudo ./sentinel status
 
 # What does the live daemon think is blocked right now?
 TOKEN=$(curl -s http://localhost:8040/api/config | jq -r '.settings.auth_token')
@@ -107,11 +107,11 @@ The daemon edits `/etc/hosts`. To see what it's currently writing:
 
 ```bash
 # macOS / Linux
-sed -n '/# distractions-free:begin/,/# distractions-free:end/p' /etc/hosts
+sed -n '/# sentinel:begin/,/# sentinel:end/p' /etc/hosts
 
 # Windows (PowerShell)
 Get-Content C:\Windows\System32\drivers\etc\hosts |
-  Select-String -Pattern "distractions-free:begin" -Context 0,100
+  Select-String -Pattern "sentinel:begin" -Context 0,100
 ```
 
 If the block isn't there during a scheduled window, the scheduler hasn't fired (check `/api/status` `last_evaluated`).
@@ -168,10 +168,10 @@ sudo pfctl -s info | head -3
 
 # Our anchor loaded?
 sudo pfctl -s Anchors
-# → distractions-free should appear
+# → sentinel should appear
 
 # What IPs are currently blocked at the firewall?
-sudo pfctl -a distractions-free -t blocked_ips -T show
+sudo pfctl -a sentinel -t blocked_ips -T show
 
 # Preview what strict mode would produce for current blocks (no root needed)
 TOKEN=$(curl -s http://localhost:8040/api/config | jq -r '.settings.auth_token')
@@ -191,13 +191,13 @@ The 3-minute warning notification and the tab-closing only fire on macOS, only v
 
 ```bash
 # Test the script generation + execution by hand (no service install needed)
-./distractions-free --test-applescript
+./sentinel --test-applescript
 ```
 
 Common gotchas:
 
 - **Running as root via launchd, but no console user detected.** `osascript` invoked as root with no user context produces a notification nobody can see. The daemon detects the console user via `stat -f %Su /dev/console` and shells out via `su - <user> -c osascript ...`. If `/dev/console` returns `root` (no one logged in), notifications are silently skipped.
-- **macOS Automation permissions.** First run, macOS prompts: *"distractions-free wants to control 'Google Chrome'."* If you click Don't Allow, AppleScript silently fails forever after. Reset in System Settings → Privacy & Security → Automation.
+- **macOS Automation permissions.** First run, macOS prompts: *"sentinel wants to control 'Google Chrome'."* If you click Don't Allow, AppleScript silently fails forever after. Reset in System Settings → Privacy & Security → Automation.
 - **Browsers not running.** The warning script first checks for open tabs; if no Chrome or Safari window matches, the notification is suppressed by design.
 
 ---
@@ -210,28 +210,28 @@ The daemon logs to stdout/stderr; launchd routes that to the system log:
 
 ```bash
 # Live tail
-log stream --predicate 'process == "distractions-free"' --level debug
+log stream --predicate 'process == "sentinel"' --level debug
 
 # Last hour
-log show --predicate 'process == "distractions-free"' --last 1h
+log show --predicate 'process == "sentinel"' --last 1h
 
 # Just the scheduler ticks
-log show --predicate 'process == "distractions-free"' --last 1h | grep -E "scheduler|hosts|dns"
+log show --predicate 'process == "sentinel"' --last 1h | grep -E "scheduler|hosts|dns"
 ```
 
-If the service was installed via `kardianos/service` defaults, the launchd plist is at `~/Library/LaunchAgents/com.github.distractions-free.plist`:
+If the service was installed via `kardianos/service` defaults, the launchd plist is at `~/Library/LaunchAgents/com.github.sentinel.plist`:
 
 ```bash
-cat ~/Library/LaunchAgents/com.github.distractions-free.plist
-launchctl print system/com.github.distractions-free
+cat ~/Library/LaunchAgents/com.github.sentinel.plist
+launchctl print system/com.github.sentinel
 ```
 
 ### Windows
 
 ```powershell
-Get-EventLog -LogName Application -Source "DistractionsFree" -Newest 50
+Get-EventLog -LogName Application -Source "Sentinel" -Newest 50
 # Service status
-Get-Service "DistractionsFree"
+Get-Service "Sentinel"
 ```
 
 ### Anywhere
@@ -239,10 +239,10 @@ Get-Service "DistractionsFree"
 If launchd / Service Manager logs aren't useful, run the daemon in the foreground to see everything live:
 
 ```bash
-sudo ./distractions-free stop          # stop the service version
-sudo ./distractions-free run           # run with the supervisor (foreground)
+sudo ./sentinel stop          # stop the service version
+sudo ./sentinel run           # run with the supervisor (foreground)
 # or, even simpler, no privileges needed for hosts-mode rule evaluation:
-./distractions-free --no-service       # uses ./config.json
+./sentinel --no-service       # uses ./config.json
 ```
 
 `--no-service` is a fast way to validate that the rules and scheduler logic work — it skips system paths and won't install anything.
@@ -251,27 +251,27 @@ sudo ./distractions-free run           # run with the supervisor (foreground)
 
 ## 6. Manual install / start / stop / uninstall
 
-The normal happy path is `sudo ./distractions-free install && sudo ./distractions-free start`. If something goes wrong, here's how to verify each step independently.
+The normal happy path is `sudo ./sentinel install && sudo ./sentinel start`. If something goes wrong, here's how to verify each step independently.
 
 ```bash
-sudo ./distractions-free install
+sudo ./sentinel install
 # Verify on macOS:
-ls -la ~/Library/LaunchAgents/com.github.distractions-free.plist
-launchctl list | grep distractions-free
+ls -la ~/Library/LaunchAgents/com.github.sentinel.plist
+launchctl list | grep sentinel
 ```
 
 ```bash
-sudo ./distractions-free start
+sudo ./sentinel start
 # Verify:
-sudo ./distractions-free status         # Should print: running
-ps aux | grep distractions-free | grep -v grep
+sudo ./sentinel status         # Should print: running
+ps aux | grep sentinel | grep -v grep
 sudo lsof -i :53 -P -n                  # only relevant in dns/strict mode
 sudo lsof -i :8040 -P -n                # web dashboard
 curl -s http://localhost:8040/api/config | jq -r '.settings.enforcement_mode'
 ```
 
 ```bash
-sudo ./distractions-free stop
+sudo ./sentinel stop
 # Verify (mode-dependent):
 #   hosts: managed block removed from /etc/hosts
 #   dns:   networksetup -getdnsservers Wi-Fi → restored to upstream
@@ -279,10 +279,10 @@ sudo ./distractions-free stop
 ```
 
 ```bash
-sudo ./distractions-free uninstall
+sudo ./sentinel uninstall
 # Verify:
-ls ~/Library/LaunchAgents/com.github.distractions-free.plist  # should be gone
-launchctl list | grep distractions-free                       # should be empty
+ls ~/Library/LaunchAgents/com.github.sentinel.plist  # should be gone
+launchctl list | grep sentinel                       # should be empty
 ```
 
 ---
@@ -293,17 +293,17 @@ Three flags exist exactly so you can test the daemon's core logic without privil
 
 ```bash
 # Will youtube.com be blocked at this specific time per current ./config.json?
-./distractions-free --test-query "2024-04-01 10:30" youtube.com
+./sentinel --test-query "2024-04-01 10:30" youtube.com
 # Output includes: applicable rules, would-block status, and a real DNS response
 # from upstream so you can verify what the upstream resolver returns.
 
 # Run the full dashboard against ./config.json (no service install, no system changes).
 # All endpoints work, including hosts-preview and pf-preview.
-./distractions-free --test-web
+./sentinel --test-web
 # → http://localhost:8040
 
 # Generate (and optionally execute) the AppleScript that closes Chrome/Safari tabs.
-./distractions-free --test-applescript
+./sentinel --test-applescript
 ```
 
 `--test-query` and `--test-web` use `./config.json` in the working directory rather than the system path, so you can iterate on groups and rules without touching the live config. `make build` followed by `--test-web` is the fastest dev loop for trying out new group shapes or schedule timings.
@@ -312,11 +312,11 @@ Three flags exist exactly so you can test the daemon's core logic without privil
 
 ## 8. The `--clean` recovery path
 
-`--clean` is the canonical "make it like distractions-free was never installed" command. Run it any time the system is in an unknown state — it does not assume `stop` succeeded, and every step is idempotent.
+`--clean` is the canonical "make it like sentinel was never installed" command. Run it any time the system is in an unknown state — it does not assume `stop` succeeded, and every step is idempotent.
 
 ```bash
-sudo ./distractions-free --clean         # interactive: prompts before deleting config dir
-sudo ./distractions-free --clean --yes   # non-interactive
+sudo ./sentinel --clean         # interactive: prompts before deleting config dir
+sudo ./sentinel --clean --yes   # non-interactive
 ```
 
 The output is one line per step:
@@ -379,31 +379,31 @@ This error only applies to `dns` and `strict` modes. In `hosts` mode the daemon 
 ### `service is already installed`
 
 ```bash
-sudo ./distractions-free uninstall
-sudo ./distractions-free install
+sudo ./sentinel uninstall
+sudo ./sentinel install
 ```
 
 If `uninstall` claims it isn't installed, the plist is dangling:
 
 ```bash
-launchctl unload ~/Library/LaunchAgents/com.github.distractions-free.plist
-rm ~/Library/LaunchAgents/com.github.distractions-free.plist
-sudo ./distractions-free install
+launchctl unload ~/Library/LaunchAgents/com.github.sentinel.plist
+rm ~/Library/LaunchAgents/com.github.sentinel.plist
+sudo ./sentinel install
 ```
 
 ### `cannot uninstall while service is running`
 
 ```bash
-sudo ./distractions-free stop
-sudo ./distractions-free uninstall
+sudo ./sentinel stop
+sudo ./sentinel uninstall
 ```
 
 If `stop` hangs or fails, force it:
 
 ```bash
-sudo pkill -f "distractions-free"
-launchctl unload ~/Library/LaunchAgents/com.github.distractions-free.plist
-sudo ./distractions-free uninstall
+sudo pkill -f "sentinel"
+launchctl unload ~/Library/LaunchAgents/com.github.sentinel.plist
+sudo ./sentinel uninstall
 ```
 
 ### Web dashboard returns 401 unauthorized
@@ -425,10 +425,10 @@ If they're still not applied:
 
 ```bash
 # Validate JSON
-python3 -m json.tool < /Library/Application\ Support/DistractionsFree/config.json
+python3 -m json.tool < /Library/Application\ Support/Sentinel/config.json
 
 # Check the daemon's logs for parse errors
-log show --predicate 'process == "distractions-free"' --last 5m | grep -i config
+log show --predicate 'process == "sentinel"' --last 5m | grep -i config
 ```
 
 If the file is malformed, the daemon logs a warning and keeps using the previous in-memory copy — your changes won't apply until you fix the JSON.
@@ -450,10 +450,10 @@ The strict enforcer degrades to DNS-only when pf setup fails. Common causes:
 To start fresh:
 
 ```bash
-sudo ./distractions-free --clean --yes   # removes our anchor + pf.conf injection
+sudo ./sentinel --clean --yes   # removes our anchor + pf.conf injection
 # inspect /etc/pf.conf — should be back to its original state
-sudo ./distractions-free install
-sudo ./distractions-free start
+sudo ./sentinel install
+sudo ./sentinel start
 # logs should show "pf: anchor installed"
 ```
 
@@ -463,4 +463,4 @@ See [§4 macOS AppleScript path](#macos-applescript-path). The most common cause
 
 ### `--clean` says "could not create service handle"
 
-Usually means the binary you're running was built for a different OS. Check `file ./distractions-free` and rebuild for the current platform with `make build`.
+Usually means the binary you're running was built for a different OS. Check `file ./sentinel` and rebuild for the current platform with `make build`.

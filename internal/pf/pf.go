@@ -18,13 +18,13 @@ import (
 )
 
 const (
-	anchorName = "distractions-free"
-	anchorFile = "/etc/pf.anchors/distractions-free"
+	anchorName = "sentinel"
+	anchorFile = "/etc/pf.anchors/sentinel"
 	pfConf     = "/etc/pf.conf"
-	markerBeg  = "# distractions-free:begin"
-	markerEnd  = "# distractions-free:end"
-	anchorLine = "anchor \"distractions-free\""
-	loadLine   = "load anchor \"distractions-free\" from \"/etc/pf.anchors/distractions-free\""
+	markerBeg  = "# sentinel:begin"
+	markerEnd  = "# sentinel:end"
+	anchorLine = "anchor \"sentinel\""
+	loadLine   = "load anchor \"sentinel\" from \"/etc/pf.anchors/sentinel\""
 	dnsTimeout = 3 * time.Second
 )
 
@@ -131,7 +131,7 @@ func InstallAnchor() error {
 	}
 
 	// Write a placeholder anchor file so pfctl can validate the config.
-	if err := os.WriteFile(anchorFile, []byte("# managed by distractions-free\n"), 0644); err != nil {
+	if err := os.WriteFile(anchorFile, []byte("# managed by sentinel\n"), 0644); err != nil {
 		return fmt.Errorf("pf: write anchor file: %w", err)
 	}
 

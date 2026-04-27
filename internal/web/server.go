@@ -10,11 +10,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/vsangava/distractions-free/internal/config"
-	"github.com/vsangava/distractions-free/internal/enforcer"
-	"github.com/vsangava/distractions-free/internal/pf"
-	"github.com/vsangava/distractions-free/internal/scheduler"
-	"github.com/vsangava/distractions-free/internal/testcli"
+	"github.com/vsangava/sentinel/internal/config"
+	"github.com/vsangava/sentinel/internal/enforcer"
+	"github.com/vsangava/sentinel/internal/pf"
+	"github.com/vsangava/sentinel/internal/scheduler"
+	"github.com/vsangava/sentinel/internal/testcli"
 )
 
 const maxPauseMinutes = 240 // 4 hours

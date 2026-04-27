@@ -1,5 +1,5 @@
 // Package cleanup implements the --clean command: a forensic recovery path that
-// removes every system-level change distractions-free may have made, regardless
+// removes every system-level change sentinel may have made, regardless
 // of whether the service was stopped gracefully.
 package cleanup
 
@@ -12,9 +12,9 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/vsangava/distractions-free/internal/config"
-	"github.com/vsangava/distractions-free/internal/enforcer"
-	"github.com/vsangava/distractions-free/internal/pf"
+	"github.com/vsangava/sentinel/internal/config"
+	"github.com/vsangava/sentinel/internal/enforcer"
+	"github.com/vsangava/sentinel/internal/pf"
 )
 
 const (
@@ -149,7 +149,7 @@ func resetDNSInterfacesWindows() []Step {
 	return []Step{{Label: "Reset DNS interfaces", Status: StatusDone, Critical: true}}
 }
 
-// CleanHostsFile removes the distractions-free managed block from /etc/hosts.
+// CleanHostsFile removes the sentinel managed block from /etc/hosts.
 // Safe to call even if no block is present (idempotent).
 func CleanHostsFile() Step {
 	// NewHostsEnforcer needs only the hosts path, which it derives from runtime.GOOS.
@@ -166,7 +166,7 @@ func CleanPFAnchor() Step {
 	if runtime.GOOS != "darwin" {
 		return Step{Label: "Remove pf anchor", Status: StatusSkipped, Detail: "not applicable on " + runtime.GOOS}
 	}
-	if _, err := os.Stat("/etc/pf.anchors/distractions-free"); os.IsNotExist(err) {
+	if _, err := os.Stat("/etc/pf.anchors/sentinel"); os.IsNotExist(err) {
 		return Step{Label: "Remove pf anchor", Status: StatusSkipped, Detail: "was not installed"}
 	}
 	pf.RemoveAnchor()

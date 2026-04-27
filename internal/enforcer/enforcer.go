@@ -11,7 +11,7 @@ import (
 	"os/exec"
 	"runtime"
 
-	"github.com/vsangava/distractions-free/internal/config"
+	"github.com/vsangava/sentinel/internal/config"
 )
 
 // Enforcer is implemented by every blocking backend.

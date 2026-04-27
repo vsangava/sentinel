@@ -16,12 +16,12 @@ jobs:
           - os: macos-latest
             goos: darwin
             goarch: arm64
-            output_name: distractions-free-macos-arm64
+            output_name: sentinel-macos-arm64
           # Windows build
           - os: windows-latest
             goos: windows
             goarch: amd64
-            output_name: distractions-free-windows-amd64.exe
+            output_name: sentinel-windows-amd64.exe
 
     runs-on: ${{ matrix.os }}
 

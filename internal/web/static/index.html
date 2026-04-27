@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Distractions-Free</title>
+    <title>Sentinel</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -438,7 +438,7 @@
 <body>
 <div class="container">
     <div class="app-header">
-        <h1>Distractions-Free</h1>
+        <h1>Sentinel</h1>
         <p>Schedule-based focus enforcement</p>
     </div>
 
@@ -776,7 +776,7 @@ async function fetchHostsPreview(cfg, panelId, codeId, metaId) {
         if (entries.length === 0) {
             document.getElementById(codeId).textContent = '# No domains in a block window right now.\n# /etc/hosts would have no managed entries.';
         } else {
-            var lines = ['# distractions-free:begin'].concat(entries).concat(['# distractions-free:end', '',
+            var lines = ['# sentinel:begin'].concat(entries).concat(['# sentinel:end', '',
                 '# ' + (data.blocked_domains||[]).length + ' domain(s) blocked · ' + entries.length + ' host entries']);
             document.getElementById(codeId).textContent = lines.join('\n');
         }

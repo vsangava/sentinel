@@ -1,4 +1,4 @@
-module github.com/vsangava/distractions-free
+module github.com/vsangava/sentinel
 
 go 1.26.2
 

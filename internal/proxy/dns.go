@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/miekg/dns"
-	"github.com/vsangava/distractions-free/internal/config"
+	"github.com/vsangava/sentinel/internal/config"
 )
 
 var (

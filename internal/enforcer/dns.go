@@ -6,8 +6,8 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/vsangava/distractions-free/internal/config"
-	"github.com/vsangava/distractions-free/internal/proxy"
+	"github.com/vsangava/sentinel/internal/config"
+	"github.com/vsangava/sentinel/internal/proxy"
 )
 
 // DNSEnforcer preserves the original DNS-proxy behaviour: it maintains a

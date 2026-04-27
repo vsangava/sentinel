@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vsangava/distractions-free/internal/config"
+	"github.com/vsangava/sentinel/internal/config"
 )
 
 func TestQueryBlocking_ValidTimeFormat(t *testing.T) {

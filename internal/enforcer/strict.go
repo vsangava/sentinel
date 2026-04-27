@@ -3,8 +3,8 @@ package enforcer
 import (
 	"log"
 
-	"github.com/vsangava/distractions-free/internal/config"
-	"github.com/vsangava/distractions-free/internal/pf"
+	"github.com/vsangava/sentinel/internal/config"
+	"github.com/vsangava/sentinel/internal/pf"
 )
 
 // StrictEnforcer composes DNS-proxy blocking with pf firewall blocking.
