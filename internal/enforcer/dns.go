@@ -1,9 +1,11 @@
 package enforcer
 
 import (
+	"bufio"
 	"log"
 	"os/exec"
 	"runtime"
+	"strings"
 	"sync"
 
 	"github.com/vsangava/sentinel/internal/config"
@@ -32,13 +34,29 @@ func (e *DNSEnforcer) Teardown() error {
 	if err := e.DeactivateAll(); err != nil {
 		log.Printf("dns teardown: %v", err)
 	}
-	// Restore system DNS — currently resets Wi-Fi only.
-	// Full multi-interface cleanup is tracked in issue #12.
-	if runtime.GOOS == "darwin" {
-		exec.Command("networksetup", "-setdnsservers", "Wi-Fi", "Empty").Run()
+	// Restore system DNS on every interface that points at 127.0.0.1.
+	switch runtime.GOOS {
+	case "darwin":
+		out, err := exec.Command("networksetup", "-listallnetworkservices").Output()
+		if err == nil {
+			sc := bufio.NewScanner(strings.NewReader(string(out)))
+			for sc.Scan() {
+				line := sc.Text()
+				if strings.HasPrefix(line, "An asterisk") || strings.TrimSpace(line) == "" {
+					continue
+				}
+				name := strings.TrimSpace(strings.TrimPrefix(line, "*"))
+				dnsOut, _ := exec.Command("networksetup", "-getdnsservers", name).Output()
+				if strings.Contains(string(dnsOut), "127.0.0.1") {
+					exec.Command("networksetup", "-setdnsservers", name, "Empty").Run()
+				}
+			}
+		} else {
+			exec.Command("networksetup", "-setdnsservers", "Wi-Fi", "Empty").Run()
+		}
 		exec.Command("dscacheutil", "-flushcache").Run()
 		exec.Command("killall", "-HUP", "mDNSResponder").Run()
-	} else if runtime.GOOS == "windows" {
+	case "windows":
 		exec.Command("powershell", "-Command",
 			"Set-DnsClientServerAddress -InterfaceAlias 'Wi-Fi' -ResetServerAddresses").Run()
 	}
