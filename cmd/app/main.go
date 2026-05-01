@@ -349,6 +349,22 @@ func main() {
 	}
 
 	if len(os.Args) > 1 {
+		// "status" is not a standard kardianos/service Control action — handle separately.
+		if os.Args[1] == "status" {
+			st, err := s.Status()
+			if err != nil {
+				log.Fatalf("Failed to get service status: %v", err)
+			}
+			switch st {
+			case service.StatusRunning:
+				fmt.Println("Sentinel is running.")
+			case service.StatusStopped:
+				fmt.Println("Sentinel is stopped.")
+			default:
+				fmt.Println("Sentinel status: unknown (service may not be installed).")
+			}
+			return
+		}
 		err = service.Control(s, os.Args[1])
 		if err != nil {
 			log.Fatalf("Failed to %s: %v", os.Args[1], err)
