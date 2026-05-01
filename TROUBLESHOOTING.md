@@ -57,7 +57,7 @@ ipconfig /flushdns
 |---|---|---|
 | Blocked sites still load | Wrong mode for your setup, or current time isn't in a block window | [§4 Mode-specific diagnostics](#4-mode-specific-diagnostics) |
 | All DNS broken (nothing resolves) | DNS-mode service stopped without restoring system DNS | [§1](#1-if-your-internet-is-broken--read-this-first) |
-| Service won't start: `permission denied` on port 53 | Running without sudo, or another process holds port 53 | [§9](#9-common-errors) |
+| Service won't start: `permission denied` or `address already in use` on port 53 | Missing sudo, or another DNS service (AdGuard Home, dnsmasq…) holds port 53 | [§9 Port 53 errors](#port-53-errors-permission-denied--address-already-in-use) |
 | Service installed but `start` does nothing | Service framework is silent about startup failures — check logs | [§5 Reading logs](#5-reading-logs) |
 | Tabs aren't being closed | Not running as console user, AppleScript permissions, browser not running | [§4 macOS AppleScript path](#macos-applescript-path) |
 | Web dashboard returns 401 unauthorized | Auth token mismatch — UI didn't bootstrap | [§9](#9-common-errors) |
@@ -365,16 +365,54 @@ networksetup -setdnsservers "Wi-Fi" Empty
 
 ## 9. Common errors
 
-### `listen udp 127.0.0.1:53: permission denied`
+### Port 53 errors (`permission denied` / `address already in use`)
 
-Port 53 is privileged. Run with `sudo`. If you *are* using sudo, something else holds the port:
+These only apply to `dns` and `strict` modes. In `hosts` mode the daemon never binds port 53.
+
+**`permission denied`** — port 53 is privileged; run with `sudo`.
+
+**`address already in use`** — another process is already listening on port 53. Find it:
 
 ```bash
 sudo lsof -i :53 -P -n
-sudo kill <PID>           # only if you know what it is
 ```
 
-This error only applies to `dns` and `strict` modes. In `hosts` mode the daemon doesn't bind any port (besides 8040 for the dashboard, which is unprivileged).
+Common culprits: AdGuard Home, Pi-hole, systemd-resolved, dnsmasq, or another Sentinel instance. Decide whether to stop it or let Sentinel share upstream with it (see below).
+
+#### Running Sentinel alongside AdGuard Home (or any other local DNS service)
+
+Sentinel needs to own port 53 to intercept queries. The other service must move to a different port so Sentinel can forward to it as upstream.
+
+**Step 1 — Move the other service off port 53.**
+
+*AdGuard Home:* Settings → DNS Settings → "DNS server configuration" → change the plain DNS port (default 53) to something like **5300**. Save and apply. AdGuard continues filtering ads/tracking; it just listens on a different port.
+
+*Pi-hole / dnsmasq:* edit the service's config to bind to a non-standard port (e.g. 5300), then restart it.
+
+**Step 2 — Point Sentinel's upstream at the other service.**
+
+```bash
+# Open the web UI and change primary_dns to 127.0.0.1:5300
+open http://localhost:8040
+# — or edit config.json directly —
+sudo nano /Library/Application\ Support/Sentinel/config.json
+# set "primary_dns": "127.0.0.1:5300"
+```
+
+You can also set a backup in case your local resolver is down:
+
+```json
+"primary_dns": "127.0.0.1:5300",
+"backup_dns":  "8.8.8.8:53"
+```
+
+**Step 3 — Restart Sentinel.**
+
+```bash
+sudo sentinel restart
+```
+
+Sentinel now owns port 53 (blocking distracting sites by returning `0.0.0.0`) and forwards all other queries to AdGuard Home, which continues its own ad/tracker filtering.
 
 ### `service is already installed`
 

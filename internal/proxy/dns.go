@@ -90,15 +90,24 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 	w.WriteMsg(m)
 }
 
-func StartDNSServer() {
+// StartDNSServer binds to 127.0.0.1:53 and serves until StopDNSServer is called.
+// It returns an error if the listener cannot be started (e.g. port already in use).
+// A nil return means the server exited cleanly after a Shutdown call.
+func StartDNSServer() error {
 	UpdateBlockedDomains(make(map[string]bool))
 	dns.HandleFunc(".", handleDNSRequest)
 
 	dnsServer = &dns.Server{Addr: "127.0.0.1:53", Net: "udp"}
 	log.Printf("Starting local DNS proxy on 127.0.0.1:53...")
 	if err := dnsServer.ListenAndServe(); err != nil {
-		log.Fatalf("Failed to start DNS server: %s", err.Error())
+		// Swallow the "use of closed network connection" error that the miekg/dns
+		// library surfaces when Shutdown() closes the UDP listener normally.
+		if strings.Contains(err.Error(), "use of closed network connection") {
+			return nil
+		}
+		return err
 	}
+	return nil
 }
 
 func StopDNSServer() {

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"runtime"
 	"strings"
@@ -91,7 +92,10 @@ func (p *program) run() {
 
 	if mode == "dns" || mode == "strict" {
 		// DNS server blocks until stopped; keep this as the last call.
-		proxy.StartDNSServer()
+		if err := proxy.StartDNSServer(); err != nil {
+			logDNSStartupError(err)
+			os.Exit(1)
+		}
 	} else {
 		// Hosts mode: no port binding needed; park the goroutine.
 		select {}
@@ -111,6 +115,31 @@ var svcConfig = &service.Config{
 	Name:        "Sentinel",
 	DisplayName: "Sentinel DNS Proxy",
 	Description: "Local DNS proxy for blocking distractions.",
+}
+
+// isPortConflict reports whether err indicates that the bind address is already in use.
+func isPortConflict(err error) bool {
+	if opErr, ok := err.(*net.OpError); ok {
+		// On Linux/macOS the inner error is syscall.EADDRINUSE.
+		// Checking the OpError type is enough — if binding failed, the port is taken.
+		if opErr.Op == "listen" || opErr.Op == "dial" {
+			return true
+		}
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "address already in use") ||       // Linux / macOS
+		strings.Contains(msg, "Only one usage of each socket") // Windows
+}
+
+// logDNSStartupError logs a human-readable diagnostic for DNS server start failures.
+func logDNSStartupError(err error) {
+	if isPortConflict(err) {
+		log.Printf("FATAL: cannot bind DNS proxy to 127.0.0.1:53 — port already in use")
+		log.Printf("       Find what holds it: sudo lsof -i :53 -P -n")
+		log.Printf("       See TROUBLESHOOTING.md §9 for AdGuard Home and other DNS service coexistence.")
+	} else {
+		log.Printf("FATAL: DNS server stopped unexpectedly: %v", err)
+	}
 }
 
 func runSetup() {
