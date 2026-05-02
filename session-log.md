@@ -1,0 +1,266 @@
+# Session Log
+
+Development history for this project, captured from Claude Code sessions. Ordered chronologically.
+
+---
+
+## Apr 26 — Session 1: README Badges & GitHub Pages Polish
+**Session ID:** `a1d34ba6` · **Duration/Size:** ~786KB · **73 tool calls**
+
+**Opening prompt:**
+> "can you add appropriate badges like release version, build passing etc. may be last release date, if appropriate."
+
+**What happened:**
+- Added GitHub badges (latest release, build status, last release date) to README.
+- Hit an issue where the CI badge was showing "failing" despite the workflow passing — investigated the badge URL and fixed it to point at the correct workflow name.
+- Added download links for the latest released macOS and Windows binaries to the GitHub Pages site (hacker theme), using the GitHub Releases API URL pattern.
+- Investigated how the hacker theme renders download buttons (via `_config.yml`) and wired up the links accordingly.
+- Incorporated `img/logo.png` into the appropriate spots in the GitHub Pages layout so the logo renders on the site.
+- Raised and merged a PR for each batch of changes.
+
+**Wrap-up:** README badges working and accurate; GitHub Pages now shows logo, download buttons for macOS and Windows binaries pointing at latest release.
+
+---
+
+## Apr 26 — Session 2: Product Messaging & Naming
+**Session ID:** `5a7827bf` · **Size:** ~352KB · **27 tool calls**
+
+**Opening prompt:**
+> "I want the main initial content to be tailored for general productivity users, parents concerned about children's online time. But, I want to keep the technical content somewhere down the line because that's what distinguishes this from all other similar tools."
+
+**What happened:**
+- Rewrote the top of the landing content to lead with productivity/parental use cases rather than technical implementation details; technical depth moved to a later section.
+- Discussed dropping the hyphen in "Distraction-Free" as a product name — explored alternatives.
+- Iterated on names: considered "Sentinal" (user's initial lean), discussed tone — wanted something non-negative.
+- Landed on **Sentinel** with tagline **"No Distractions"**.
+- Raised the question of whether to rename the executable too, and decided to treat that as a follow-on.
+
+**Wrap-up:** Product name settled as Sentinel. Content hierarchy updated — user-friendly framing first, technical depth second. Executable rename deferred to next session.
+
+---
+
+## Apr 26 — Session 3: Full Rename to Sentinel + MIT License
+**Session ID:** `80c4d585` · **Size:** ~1809KB · **121 tool calls**
+
+**Opening prompt:**
+> "We are renaming the executable to Sentinel. The binary commands (`./distractions-free`), repo URLs, and system paths need to be changed along with matching docs updates. can you make the changes"
+
+**What happened:**
+- Performed a full rename across the codebase: binary name, Go module path, service name (`com.sentinel`), system paths (`/Library/Application Support/Sentinel/`), all docs and README references.
+- Clarified that the GitHub repo itself needed to be renamed manually — Claude can't do that via API, so user was informed.
+- Fixed `_config.yml` for GitHub Pages to reflect the new name/URLs.
+- Raised and merged the rename PR.
+- Identified and fixed a logo transparency issue on the GitHub Pages site (PNG was rendering with a white background instead of transparent).
+- User asked for a suitable open-source license — explored options, landed on **MIT License**, added `LICENSE` file.
+- Raised and merged a second PR for the logo and license changes.
+
+**Wrap-up:** Project fully renamed to Sentinel across all code, config, paths, and docs. MIT license added. Logo rendering fixed.
+
+---
+
+## Apr 26 — Session 4: Release v0.1.0
+**Session ID:** `dababf02` · **Size:** ~22KB · **2 tool calls**
+
+**Opening prompt:**
+> "can you release v0.1.0"
+
+**What happened:**
+- Tagged and pushed `v0.1.0`, triggering the release workflow to build and publish binaries.
+
+**Wrap-up:** First public release shipped.
+
+---
+
+## Apr 28 — Session 5: Default Config Overhaul + Single Config Source
+**Session ID:** `ef31ccdd` · **Size:** ~431KB · **43 tool calls**
+
+**Opening prompt:**
+> "make some changes to the default config. to games add rbxcdn.com. add a new category and include youtube and similar common domains. games should be blocked weekdays 9-12, 2-4, 6-7. same for videos and for social block full time. weekends, games blocked 9-12, 6-7. same for videos and social block full time."
+
+**What happened:**
+- Updated default config: added `rbxcdn.com` to Games, created a new Videos category (YouTube and similar), defined Social as always-blocked.
+- Blocking schedule set: weekdays Games/Videos blocked 9-12, 2-4, 6-7; Social blocked all day; weekends Games/Videos blocked 9-12, 6-7.
+- Discovered the default config was duplicated in three places — discussed why and whether it could be unified.
+- Consolidated to a single canonical config source; service install path now reads from that.
+- Cleaned up the auth token: left the field empty in the file, load logic fills it at startup.
+- Committed config changes and corresponding README updates as separate commits on a feature branch.
+- Raised PR, approved, and cut the next release.
+
+**Wrap-up:** Default config now meaningful out of the box. Config duplication resolved. Next version released.
+
+---
+
+## Apr 29 — Session 6: Cross-Midnight Time Ranges
+**Session ID:** `6bdb38e6` · **Size:** ~351KB · **25 tool calls**
+
+**Opening prompt:**
+> "I am thinking, if we want to block a domain overnight, say from 9:30pm to next day 8:00am, currently it needs two entries from 21:30-23:59 and 00:00-08:00. I want to think about supporting specifying the same as 21:30-08:00 and make it work accordingly. Think about it and show me a plan."
+
+**What happened:**
+- Discussed the UX problem: overnight blocks requiring two separate schedule entries is awkward.
+- Agent explored the scheduler logic and produced an implementation plan for cross-midnight range detection (if `end < start`, treat as spanning midnight).
+- Reviewed the plan, approved implementation.
+- Changes implemented, committed, PR raised, merged, and a new release cut.
+
+**Wrap-up:** Scheduler now supports single cross-midnight time range entries (e.g., `21:30-08:00`). Released.
+
+---
+
+## Apr 29 — Session 7: Simplified Install/Uninstall
+**Session ID:** `42c9cf03` · **Size:** ~433KB · **39 tool calls**
+
+**Opening prompt:**
+> "can you suggest any better and simpler ways to install and uninstall this app/service? including cleanup. right now, it takes three different commands to install for instance."
+
+**What happened:**
+- Explored the current install flow (three separate commands required) and identified friction.
+- Agent proposed and designed a simplified `install`/`uninstall` single-command flow.
+- Introduced `dev-install` and `dev-uninstall` as separate targets for development use — user asked for a clear explanation of when to use dev vs production variants.
+- Confirmed: `dev-*` uses local binary + local config, skips system path setup; production `install` goes through the full launchd service setup.
+- Implemented changes on a feature branch, raised PR, merged, and released.
+
+**Wrap-up:** Installation reduced to a single command. Dev and production install paths clearly separated. Released.
+
+---
+
+## Apr 29 — Session 8: CLI Argument Review & Consistency
+**Session ID:** `2c98a133` · **Size:** ~633KB · **75 tool calls**
+
+**Opening prompt:**
+> "can you review all the command line arguments and tell me if they are good, well-named and consistent? Tell me if you would recommend any changes. Also, let me know if -- prefix should be used or dropped."
+
+**What happened:**
+- Reviewed all existing CLI flags for naming clarity, consistency, and Go CLI conventions.
+- Recommended keeping `--` prefix (standard for long flags in Go), renaming several flags for clarity and consistency.
+- Implemented the agreed renaming and consistency fixes across the codebase and docs.
+- Raised PR, merged, released next version.
+
+**Wrap-up:** CLI flags standardised with `--` prefix and consistent naming. Released.
+
+---
+
+## Apr 30 — Session 9: Product Landing Page
+**Session ID:** `00faa62e` · **Size:** ~629KB · **57 tool calls**
+
+**Opening prompt:**
+> "just what we can do to have a product page in a better way, right now using a simple github pages. is it possible to do something more elaborate like say astrowind. Use this site only for format/style etc. I don't need to or want to use Astro. Just propose a plan. Note, if we are adding a lot of new files, plan such that they are properly located in a separate folder."
+
+**What happened:**
+- Explored the existing simple GitHub Pages/hacker theme setup.
+- Planned a richer landing page (pure HTML/CSS/JS, no framework) inspired by SaaS landing page conventions — hero, features, install section, download CTAs — living in a `docs/` folder.
+- Discussed local testing: run Jekyll locally or open the HTML directly.
+- Built out the full landing page per the plan.
+- Identified that macOS was not prominently featured — user wanted macOS (especially Apple Silicon) to be the primary CTA, Windows secondary.
+- Fixed a button text contrast issue (text was same colour as background).
+- Raised PR, merged, released.
+- Added the Sentinel logo/icon to the web admin/status dashboard page as a follow-on.
+- Investigated the missing macOS Intel build in the release workflow matrix — fixed so the workflow actually runs that target.
+
+**Wrap-up:** Full product landing page live on GitHub Pages. macOS Apple Silicon CTA prominent. macOS Intel build fixed in CI. Logo in admin dashboard. Released.
+
+---
+
+## Apr 30 — Session 10: Feature Review & GitHub Issue Creation
+**Session ID:** `027fb157` · **Size:** ~361KB · **42 tool calls**
+
+**Opening prompt:**
+> "review the functionality and feature set for this product and give me any ideas on any improvements or additional features. what else would other such products do that we should add."
+
+**What happened:**
+- Agent explored the full codebase (entry point, config, scheduler, proxy, web dashboard, test CLI).
+- Generated a prioritised list of feature ideas and improvements spanning: UX, reliability, cross-platform parity, observability, and power-user features.
+- Created GitHub issues for each item — both high-priority and lower-priority — with labels for priority, complexity, and type (fix/feature/enhancement).
+- Added a note to each issue that the write-up is initial guidance and the implementer should revalidate before starting, since the codebase may have diverged.
+- Added comments to issues that would also require README or docs site updates, flagging that documentation must be part of the implementation.
+
+**Wrap-up:** Backlog fully populated with labelled GitHub issues. All issues include a revalidation note and docs-update flag where relevant.
+
+---
+
+## Apr 30 — Session 11: Bulk Fix — Issues 41, 42, 43, 47, 52
+**Session ID:** `80332093` · **Size:** ~926KB · **100 tool calls**
+
+**Opening prompt:**
+> "handle issues of fix type 41, 42, 43, 47 and 52. each issue in a separate feature branch, with a good pr and commit messages. work in this sequence and ask me after raising pr if it should be approved and merged before proceeding to the next."
+
+**What happened:**
+- Agent fetched all five issue descriptions and explored the relevant codebase areas.
+- Each issue was implemented on its own feature branch with a focused commit and descriptive PR.
+- Issues handled sequentially: after each PR was raised, user was asked to approve before proceeding.
+- User approved merges one by one; Claude handled branch cleanup after each merge.
+- Versioning discussion mid-session (user confirmed to use the next version number).
+- After completing, user asked whether to continue in this session or `/clear` first for the next batch — deferred to next session.
+
+**Wrap-up:** Five fix issues resolved, each with individual PRs, merged and cleaned up. Released.
+
+---
+
+## May 1 — Session 12: Issues 63 & 64 — Port 53 Conflicts & DNS Crash Handling
+**Session ID:** `e078b7b6` · **Size:** ~916KB · **86 tool calls**
+
+**Opening prompt:**
+> "review and fix issues 63 and 64. Write detailed explanation root cause and fix details in the issue and describe in PR. separate commits for both fixes."
+
+**What happened:**
+- Reviewed both issues: #63 was about graceful handling when port 53 is already in use; #64 was related DNS crash/error behaviour.
+- Fixed #63: error message on port 53 conflict revised — detailed steps removed from the runtime log message.
+- Moved the troubleshooting content (what to do if running AdGuard Home, etc.) into `troubleshooting.md` instead of embedding it in error output.
+- Fixed #64 with a separate commit.
+- Each issue got a detailed root cause write-up posted back to the GitHub issue, and PRs had full descriptions.
+- Both PRs merged, branches cleaned up, new release cut.
+
+**Wrap-up:** Port conflict and DNS crash issues resolved. Troubleshooting guidance properly located in `troubleshooting.md`. Released.
+
+---
+
+## May 1 — Session 13: DNS Failure Mode Config Option
+**Session ID:** `f38a5726` · **Size:** ~757KB · **73 tool calls**
+
+**Opening prompt:**
+> "as documented in troubleshooting.md if there are port conflicts due to adguard, we are asking the user to change adguard port. Instead, I am wondering if Sentinel can use a different port say 5353 that is less likely to conflict with others? And default the upstream dns to be whatever was previously configured? Are there any considerations or tradeoffs with this approach?"
+
+**What happened:**
+- Discussed using port 5353 as a default to avoid conflicts — identified tradeoffs (requires updating system DNS resolver to point at non-standard port; some resolvers don't support this).
+- Follow-up question: what happens if Sentinel crashes after it has changed the system DNS to point at itself? Answer: DNS resolution fails completely until Sentinel restarts or DNS is manually restored.
+- Decided to expose a `dns_failure_mode` config option: `safe` (default — backup DNS is the original system DNS, so if Sentinel crashes, resolution falls back gracefully) vs `strict` (fail hard, user opt-in).
+- Also auto-detected upstream DNS and auto-configured system DNS on startup (separate PR from the prior session's work).
+- Confirmed that `stop`/`clean` commands properly restore the backup DNS when cleaning up.
+- Raised PR for the `dns_failure_mode` feature, ensured prior pending changes were committed and PR'd first.
+- Released next version.
+
+**Wrap-up:** `dns_failure_mode` config option added. System DNS auto-detection on startup. Cleanup commands verified to restore DNS. Released.
+
+---
+
+## May 1 — Session 14: Log Rotation & Storage (Issue 44)
+**Session ID:** `59ad7a53` · **Size:** ~376KB · **43 tool calls**
+
+**Opening prompt:**
+> "review issue 44. How do we make sure this log file doesn't grow unbounded? and what is a good place to store it? same as config file?"
+
+**What happened:**
+- Fetched issue #44 details and explored the current logging setup and config file path conventions.
+- Discussed log rotation strategies: size-based rotation with a configurable max size and number of retained files.
+- Agreed that storing the log file alongside the config (`/Library/Application Support/Sentinel/`) is the right location for consistency.
+- Implementation of structured log rotation was planned/started.
+- Session ended mid-work (user asked "do you remember my last question" — context had been lost). Likely continued in a subsequent session.
+
+**Wrap-up:** Log rotation design agreed (size-based, co-located with config). Implementation may have carried over.
+
+---
+
+## May 1 — Session 15: This Session Log
+**Session ID:** `79011b10` · **Size:** ~69KB · **6 tool calls**
+
+**Opening prompt:**
+> "can you list all the sessions in this folder along with timestamps, any summary stats and the prompts I used."
+
+**What happened:**
+- Parsed all 19 session JSONL files from `.claude/projects/`, extracted user prompts, message counts, tool call counts, and file sizes.
+- Filtered out noise (exit sessions, internal-only sessions).
+- User asked for a richer output: drop trivial sessions, expand each substantive session with follow-up instructions and a wrap-up, write to a markdown file.
+- This file is the result.
+
+---
+
+*Generated from Claude Code session history on 2026-05-01.*
