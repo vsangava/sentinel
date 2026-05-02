@@ -57,6 +57,7 @@ ipconfig /flushdns
 |---|---|---|
 | Blocked sites still load | Wrong mode for your setup, or current time isn't in a block window | [§4 Mode-specific diagnostics](#4-mode-specific-diagnostics) |
 | Site blocked in DNS but loads in browser (strict mode) | CDN rotated to an IP not yet in pf rules, or pre-existing connection | [§4 strict mode — diagnosing "pf active but site still loads"](#diagnosing-pf-active-but-site-still-loads) |
+| Blocked sites load in Chrome/Firefox despite `nslookup` returning `0.0.0.0` | Browser is using DNS-over-HTTPS (DoH), bypassing the system resolver | [§4 Browser DNS-over-HTTPS bypass](#browser-dns-over-https-doh-bypass) |
 | All DNS broken (nothing resolves) | DNS-mode service stopped without restoring system DNS | [§1](#1-if-your-internet-is-broken--read-this-first) |
 | Service won't start: `permission denied` or `address already in use` on port 53 | Missing sudo, or another DNS service (AdGuard Home, dnsmasq…) holds port 53 | [§9 Port 53 errors](#port-53-errors-permission-denied--address-already-in-use) |
 | Service installed but `start` does nothing | Service framework is silent about startup failures — check logs | [§5 Reading logs](#5-reading-logs) |
@@ -299,6 +300,67 @@ sudo pfctl -a sentinel -s rules
 - **IPv6 must be covered**: Browsers will prefer IPv6 if available. If only IPv4 IPs are in the anchor, a site reachable via IPv6 will bypass the block. Sentinel resolves both A and AAAA records — verify both tables are populated.
 
 If `Setup` failed (logs show `pf anchor setup failed`), the strict enforcer degrades to DNS-only. That's intentional — better to keep blocking at the DNS layer than crash the daemon. Look in the daemon logs for the specific pfctl error, then run `sudo ./sentinel clean --yes && sudo ./sentinel install && sudo ./sentinel start` to reset.
+
+### Browser DNS-over-HTTPS (DoH) bypass
+
+Modern browsers (Chrome, Firefox, Edge) have a built-in encrypted DNS client that sends queries directly to a DoH provider (e.g. `dns.google`, `cloudflare-dns.com`) over HTTPS on port 443. This completely bypasses the system resolver at `127.0.0.1:53`, so `dns` mode blocks are invisible to the browser even when `nslookup` or `dig` correctly return `0.0.0.0`.
+
+**How each mode handles it:**
+
+| Mode | How it blocks | DoH bypasses it? |
+|---|---|---|
+| `hosts` | Writes `0.0.0.0 <domain>` to `/etc/hosts` — checked by the OS before any DNS | **No** — `getaddrinfo` reads `/etc/hosts` first, even when DoH is active |
+| `dns` | Intercepts at port 53 | **Yes** — browser skips port 53 entirely |
+| `strict` | Port 53 + pf firewall blocks the resolved IPs at the kernel | **No** — pf drops the TCP connection regardless of how the IP was obtained |
+
+**Verify that DoH is bypassing your block:**
+
+```bash
+# 1. Confirm the system resolver sees the block (goes through Sentinel's proxy)
+nslookup discord.com
+# → Should return 0.0.0.0
+
+# 2. Simulate what Chrome does — query DoH directly, bypassing 127.0.0.1:53
+curl -s "https://dns.google/resolve?name=discord.com&type=A" \
+  | jq '.Answer[] | select(.type==1) | .data'
+# → Returns a real IP (e.g. 162.159.128.233) — this is what Chrome uses
+```
+
+If step 1 returns `0.0.0.0` but step 2 returns a real IP, the block is being bypassed via DoH.
+
+**Fix options:**
+
+**Option A — Disable Secure DNS in the browser (per-browser)**
+
+- Chrome: `chrome://settings/security` → "Use secure DNS" → off
+- Firefox: Settings → General → "DNS over HTTPS" → off
+- Edge: `edge://settings/privacy` → "Use secure DNS" → off
+
+**Option B — Switch to `strict` mode (recommended)**
+
+Strict mode resolves the real IPs of blocked domains and installs them in a pf table. Even if DoH gives the browser a live IP, pf drops the connection at the kernel before any packets leave the machine.
+
+```bash
+# Verify strict mode is blocking at the IP layer:
+
+# Step 1: get the real IP via DoH (same path as Chrome)
+IP=$(curl -s "https://dns.google/resolve?name=discord.com&type=A" \
+  | jq -r '.Answer[] | select(.type==1) | .data' | head -1)
+echo "Real IP: $IP"
+
+# Step 2: confirm that IP is in Sentinel's pf table
+sudo pfctl -a sentinel -t blocked_ips -T show | grep "$IP"
+# → If it appears, pf is blocking it
+
+# Step 3: try to actually connect (simulates Chrome making the request)
+curl -v --connect-to "discord.com:443:$IP:443" https://discord.com --max-time 5
+# → dns mode:    succeeds — site loads
+# → strict mode: connection times out — pf dropped it
+```
+
+**Option C — Block the DoH provider domains (fragile)**
+
+Add `dns.google`, `cloudflare-dns.com`, `doh.opendns.com` to your blocked groups so Sentinel returns `0.0.0.0` for the DoH endpoints themselves, forcing the browser to fall back to the system resolver. This is brittle — browsers have many fallback DoH providers and will silently switch between them.
 
 ### macOS AppleScript path
 
