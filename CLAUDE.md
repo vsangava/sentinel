@@ -80,3 +80,16 @@ Config is re-read every scheduler tick — live edits take effect within 60 seco
 - Tab closing and pre-block notifications are macOS-only (AppleScript targeting Chrome and Safari).
 - DNS cache flush uses `dscacheutil -flushcache` + `killall -HUP mDNSResponder` on macOS.
 - Port 53 binding requires root; service installation requires admin privileges.
+
+## Session Log
+
+After merging a PR or completing a significant unit of work, append a new entry to `session-log.md` in the repo root. Follow the existing format in that file:
+
+- **Header:** date, short title describing the work, session ID (first 8 chars of the session), file size and tool-call count if available
+- **Opening prompt:** the first substantive thing the user asked for this session
+- **What happened:** a narrative of the follow-up instructions and key decisions made during the session
+- **Wrap-up:** one or two sentences on what was delivered
+
+Do not wait to be asked — update the file as part of closing out a piece of work, the same way you raise a PR or bump a version.
+
+If multiple Claude Code instances are running in parallel on this repo, each should append its own entry independently. Before appending, re-read the current state of `session-log.md` to avoid overwriting another session's entry that was added concurrently.
