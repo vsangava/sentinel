@@ -306,6 +306,7 @@ Each scheduler tick also:
 
 **Known limitations:**
 - Tracking requires `dns` or `strict` mode. In `hosts` mode the proxy never sees queries.
+- **Browsers with DNS-over-HTTPS (DoH) active bypass usage tracking entirely.** Chrome's "Use secure DNS" and Firefox's "DNS over HTTPS" send queries directly to a remote DoH provider (e.g. `dns.google`) over HTTPS on port 443, completely skipping `127.0.0.1:53`. Those queries never reach the proxy, so no usage event is recorded and quota never fills up. Switching to `strict` mode does not fix this — pf blocks connections but does not intercept HTTPS traffic to DoH providers. The reliable fix is to disable Secure DNS in the browser, or to add the DoH provider domains (`dns.google`, `cloudflare-dns.com`, `doh.opendns.com`) to a blocked group so the browser falls back to the system resolver. See [TROUBLESHOOTING.md §4 Browser DNS-over-HTTPS bypass](./TROUBLESHOOTING.md#browser-dns-over-https-doh-bypass) for diagnostic commands.
 - Background tabs for SPAs (Reddit, YouTube) generate DNS traffic and consume quota even when the user is not actively browsing. This mirrors the behaviour of iOS Screen Time for network-active apps and cannot be solved without a browser extension.
 - The 5-minute bucket slightly over-counts sessions shorter than 5 minutes (a 2-minute visit counts as 5 minutes) and slightly under-counts if another tool (AdGuard Home, systemd-resolved) intercepts queries before they reach Sentinel.
 
