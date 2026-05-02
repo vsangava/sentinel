@@ -224,6 +224,21 @@ func EvaluateRulesAtTime(t time.Time, cfg config.Config) map[string]bool {
 		return make(map[string]bool)
 	}
 
+	// During a Pomodoro work phase, activate ALL rules with IsActive=true,
+	// bypassing their schedule windows entirely for stricter blocking.
+	if cfg.IsLockedByPomodoro(t) {
+		forced := make(map[string]bool)
+		for _, rule := range cfg.Rules {
+			if !rule.IsActive {
+				continue
+			}
+			for _, domain := range cfg.ResolveGroup(rule.Group) {
+				forced[domain] = true
+			}
+		}
+		return forced
+	}
+
 	currentDay := t.Weekday().String()
 	yesterdayDay := t.AddDate(0, 0, -1).Weekday().String()
 	now := time.Date(0, 1, 1, t.Hour(), t.Minute(), 0, 0, time.UTC)
@@ -368,6 +383,29 @@ func evaluateRules() {
 			log.Printf("scheduler: clear expired pause: %v", err)
 		}
 		cfg = config.GetConfig()
+	}
+
+	// Handle Pomodoro phase transitions.
+	if cfg.Pomodoro != nil && !now.Before(cfg.Pomodoro.PhaseEndsAt) {
+		switch cfg.Pomodoro.Phase {
+		case "work":
+			breakMin := cfg.Pomodoro.BreakMinutes
+			config.AdvancePomodoroPhase()
+			if err := config.SaveConfig(); err != nil {
+				log.Printf("scheduler: save pomodoro break phase: %v", err)
+			}
+			cfg = config.GetConfig()
+			sendPomodoroNotification("Sentinel — Break time!",
+				fmt.Sprintf("Take a %d-minute break.", breakMin))
+		case "break":
+			config.ClearPomodoro()
+			if err := config.SaveConfig(); err != nil {
+				log.Printf("scheduler: clear pomodoro session: %v", err)
+			}
+			cfg = config.GetConfig()
+			sendPomodoroNotification("Sentinel — Ready?",
+				"Break over. Start a new focus session when ready.")
+		}
 	}
 
 	newBlocked := EvaluateRulesAtTime(now, cfg)
@@ -651,5 +689,12 @@ func closeMacOSTabs(domains []string) {
 	script := scriptGenerator.GenerateCloseTabsScript(domains)
 	scriptExecutor.LogScript(script)
 	scriptExecutor.ExecuteScript(script)
+}
+
+func sendPomodoroNotification(title, message string) {
+	script := fmt.Sprintf(`display notification %q with title %q sound name "Ping"`, message, title)
+	if err := scriptExecutor.ExecuteScript(script); err != nil {
+		log.Printf("scheduler: pomodoro notification: %v", err)
+	}
 }
 

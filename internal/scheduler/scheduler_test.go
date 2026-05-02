@@ -676,3 +676,74 @@ func TestGenerateCloseTabsScript_IncludesArcAndBrave(t *testing.T) {
 		}
 	}
 }
+
+// ── Pomodoro override tests ───────────────────────────────────────────────────
+
+func pomodoroConfig() config.Config {
+	return config.Config{
+		Groups: map[string][]string{
+			"active":   {"active.com"},
+			"inactive": {"inactive.com"},
+		},
+		Rules: []config.Rule{
+			{Group: "active", IsActive: true, Schedules: map[string][]config.TimeSlot{
+				// Monday 02:00–03:00 — deliberately outside any test time we use
+				"Monday": {{Start: "02:00", End: "03:00"}},
+			}},
+			{Group: "inactive", IsActive: false, Schedules: map[string][]config.TimeSlot{
+				"Monday": {{Start: "00:00", End: "23:59"}},
+			}},
+		},
+	}
+}
+
+func TestEvaluateRulesAtTime_PomodoroWorkPhase_BlocksAllActiveRules(t *testing.T) {
+	testTime := time.Date(2024, time.April, 1, 12, 0, 0, 0, time.UTC) // Monday noon
+	cfg := pomodoroConfig()
+	cfg.Pomodoro = &config.PomodoroSession{
+		Phase:       "work",
+		PhaseEndsAt: testTime.Add(10 * time.Minute),
+	}
+
+	// Time is outside all schedule slots — should still be blocked during work phase
+	result := EvaluateRulesAtTime(testTime, cfg)
+
+	if !result["active.com"] {
+		t.Error("expected active.com to be blocked during Pomodoro work phase")
+	}
+	if result["inactive.com"] {
+		t.Error("expected inactive.com NOT blocked (rule is inactive)")
+	}
+}
+
+func TestEvaluateRulesAtTime_PomodoroBreakPhase_UsesSchedule(t *testing.T) {
+	testTime := time.Date(2024, time.April, 1, 12, 0, 0, 0, time.UTC)
+	cfg := pomodoroConfig()
+	cfg.Pomodoro = &config.PomodoroSession{
+		Phase:       "break",
+		PhaseEndsAt: testTime.Add(5 * time.Minute),
+	}
+
+	// Monday noon — outside the 02:00–03:00 schedule window
+	result := EvaluateRulesAtTime(testTime, cfg)
+
+	if result["active.com"] {
+		t.Error("expected active.com NOT blocked during break phase (out of schedule)")
+	}
+}
+
+func TestEvaluateRulesAtTime_PomodoroWorkExpired_FallsThrough(t *testing.T) {
+	testTime := time.Date(2024, time.April, 1, 12, 0, 0, 0, time.UTC)
+
+	cfg := pomodoroConfig()
+	cfg.Pomodoro = &config.PomodoroSession{
+		Phase:       "work",
+		PhaseEndsAt: testTime.Add(-1 * time.Second), // expired before testTime
+	}
+
+	result := EvaluateRulesAtTime(testTime, cfg)
+
+	if result["active.com"] {
+		t.Error("expected active.com NOT blocked after work phase expires (out of schedule)")
+	}
+}
