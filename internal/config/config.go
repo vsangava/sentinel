@@ -68,11 +68,22 @@ type PauseWindow struct {
 	Until time.Time `json:"until"`
 }
 
+// PomodoroSession tracks an active Pomodoro cycle.
+// Phase is "work" or "break". There is no auto-restart; each work session
+// must be started explicitly by the user.
+type PomodoroSession struct {
+	Phase        string    `json:"phase"`
+	PhaseEndsAt  time.Time `json:"phase_ends_at"`
+	WorkMinutes  int       `json:"work_minutes"`
+	BreakMinutes int       `json:"break_minutes"`
+}
+
 type Config struct {
 	Settings Settings            `json:"settings"`
 	Groups   map[string][]string `json:"groups"`
 	Rules    []Rule              `json:"rules"`
 	Pause    *PauseWindow        `json:"pause,omitempty"`
+	Pomodoro *PomodoroSession    `json:"pomodoro,omitempty"`
 }
 
 // IsPaused reports whether all blocking rules are suspended at time t.
@@ -173,6 +184,47 @@ func ClearPause() {
 	mu.Lock()
 	defer mu.Unlock()
 	AppConfig.Pause = nil
+}
+
+// IsLockedByPomodoro reports whether the Pomodoro work phase is active at t.
+func (c Config) IsLockedByPomodoro(t time.Time) bool {
+	return c.Pomodoro != nil && c.Pomodoro.Phase == "work" && t.Before(c.Pomodoro.PhaseEndsAt)
+}
+
+// StartPomodoro begins a new Pomodoro work session.
+// Call SaveConfig to persist.
+func StartPomodoro(workMin, breakMin int) {
+	mu.Lock()
+	defer mu.Unlock()
+	AppConfig.Pomodoro = &PomodoroSession{
+		Phase:        "work",
+		PhaseEndsAt:  time.Now().Add(time.Duration(workMin) * time.Minute),
+		WorkMinutes:  workMin,
+		BreakMinutes: breakMin,
+	}
+}
+
+// AdvancePomodoroPhase transitions the work phase to break.
+// Must only be called when the current phase is "work" and has just expired.
+// Call SaveConfig to persist.
+func AdvancePomodoroPhase() {
+	mu.Lock()
+	defer mu.Unlock()
+	if AppConfig.Pomodoro == nil || AppConfig.Pomodoro.Phase != "work" {
+		return
+	}
+	AppConfig.Pomodoro.Phase = "break"
+	AppConfig.Pomodoro.PhaseEndsAt = time.Now().Add(
+		time.Duration(AppConfig.Pomodoro.BreakMinutes) * time.Minute,
+	)
+}
+
+// ClearPomodoro removes any active Pomodoro session.
+// Call SaveConfig to persist.
+func ClearPomodoro() {
+	mu.Lock()
+	defer mu.Unlock()
+	AppConfig.Pomodoro = nil
 }
 
 // SaveConfig writes the current in-memory config to disk.

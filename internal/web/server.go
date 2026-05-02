@@ -4,6 +4,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
@@ -19,6 +20,13 @@ import (
 )
 
 const maxPauseMinutes = 240 // 4 hours
+
+const (
+	minPomodoroWork  = 1
+	maxPomodoroWork  = 120
+	minPomodoroBreak = 1
+	maxPomodoroBreak = 60
+)
 
 //go:embed static/*
 var webFiles embed.FS
@@ -141,6 +149,11 @@ func UpdateConfigHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Preserve the existing auth token — callers cannot replace it via this endpoint.
 	existing := config.GetConfig()
+	if existing.IsLockedByPomodoro(time.Now()) {
+		w.WriteHeader(http.StatusLocked)
+		json.NewEncoder(w).Encode(map[string]string{"error": "config changes are locked during a Pomodoro work session"})
+		return
+	}
 	cfg.Settings.AuthToken = existing.Settings.AuthToken
 
 	data, _ := json.MarshalIndent(cfg, "", "  ")
@@ -172,14 +185,24 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 		lastEval = time.Now()
 	}
 	cfg := config.GetConfig()
+	now := time.Now()
 	resp := map[string]any{
 		"blocked_domains":  blocked,
 		"last_evaluated":   lastEval,
 		"enforcement_mode": cfg.Settings.GetEnforcementMode(),
-		"paused":           cfg.IsPaused(time.Now()),
+		"paused":           cfg.IsPaused(now),
 	}
 	if cfg.Pause != nil {
 		resp["paused_until"] = cfg.Pause.Until.Format(time.RFC3339)
+	}
+	if cfg.Pomodoro != nil {
+		resp["pomodoro"] = map[string]any{
+			"phase":         cfg.Pomodoro.Phase,
+			"phase_ends_at": cfg.Pomodoro.PhaseEndsAt.Format(time.RFC3339),
+			"work_minutes":  cfg.Pomodoro.WorkMinutes,
+			"break_minutes": cfg.Pomodoro.BreakMinutes,
+			"locked":        cfg.IsLockedByPomodoro(now),
+		}
 	}
 	json.NewEncoder(w).Encode(resp)
 }
@@ -188,6 +211,12 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 // Body: {"minutes": N} where N must be between 1 and maxPauseMinutes.
 func PauseHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+
+	if cfg := config.GetConfig(); cfg.IsLockedByPomodoro(time.Now()) {
+		w.WriteHeader(http.StatusLocked)
+		json.NewEncoder(w).Encode(map[string]string{"error": "blocking is locked during a Pomodoro work session"})
+		return
+	}
 
 	var body struct {
 		Minutes int `json:"minutes"`
@@ -228,6 +257,71 @@ func ResumeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// PomodoroStartHandler handles POST /api/pomodoro/start.
+// Body: {"work_minutes": N, "break_minutes": M}
+func PomodoroStartHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var body struct {
+		WorkMinutes  int `json:"work_minutes"`
+		BreakMinutes int `json:"break_minutes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	if body.WorkMinutes < minPomodoroWork || body.WorkMinutes > maxPomodoroWork {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("work_minutes must be between %d and %d", minPomodoroWork, maxPomodoroWork),
+		})
+		return
+	}
+	if body.BreakMinutes < minPomodoroBreak || body.BreakMinutes > maxPomodoroBreak {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("break_minutes must be between %d and %d", minPomodoroBreak, maxPomodoroBreak),
+		})
+		return
+	}
+
+	config.StartPomodoro(body.WorkMinutes, body.BreakMinutes)
+	if err := config.SaveConfig(); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "failed to save config: " + err.Error()})
+		return
+	}
+
+	cfg := config.GetConfig()
+	json.NewEncoder(w).Encode(map[string]any{
+		"status":        "ok",
+		"phase":         cfg.Pomodoro.Phase,
+		"phase_ends_at": cfg.Pomodoro.PhaseEndsAt.Format(time.RFC3339),
+	})
+}
+
+// PomodoroStopHandler handles DELETE /api/pomodoro.
+// Returns 423 if currently in work phase (lock-down active).
+func PomodoroStopHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	cfg := config.GetConfig()
+	if cfg.IsLockedByPomodoro(time.Now()) {
+		w.WriteHeader(http.StatusLocked)
+		json.NewEncoder(w).Encode(map[string]string{"error": "cannot stop session during a work phase"})
+		return
+	}
+
+	config.ClearPomodoro()
+	if err := config.SaveConfig(); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "failed to save config: " + err.Error()})
+		return
+	}
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
@@ -442,6 +536,20 @@ func StartWebServer() {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
 	}))
+	mux.HandleFunc("/api/pomodoro/start", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		PomodoroStartHandler(w, r)
+	}))
+	mux.HandleFunc("/api/pomodoro", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		PomodoroStopHandler(w, r)
+	}))
 	mux.HandleFunc("/api/events", authMiddleware(EventsHandler))
 
 	log.Println("Web server starting on http://localhost:8040")
@@ -478,6 +586,20 @@ func StartTestWebServer() {
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
+	}))
+	mux.HandleFunc("/api/pomodoro/start", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		PomodoroStartHandler(w, r)
+	}))
+	mux.HandleFunc("/api/pomodoro", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		PomodoroStopHandler(w, r)
 	}))
 	mux.HandleFunc("/api/events", authMiddleware(EventsHandler))
 

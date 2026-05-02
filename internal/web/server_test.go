@@ -465,3 +465,162 @@ func BenchmarkConfigHandler(b *testing.B) {
 		handler.ServeHTTP(rr, req)
 	}
 }
+
+// ── Pomodoro handler tests ────────────────────────────────────────────────────
+
+func authRequest(method, path string, body []byte) *http.Request {
+	var req *http.Request
+	if body != nil {
+		req, _ = http.NewRequest(method, path, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+	} else {
+		req, _ = http.NewRequest(method, path, nil)
+	}
+	// Use the in-memory auth token
+	req.Header.Set("X-Auth-Token", config.AppConfig.Settings.AuthToken)
+	return req
+}
+
+func setWorkPhase(t *testing.T) {
+	t.Helper()
+	t.Cleanup(func() { config.AppConfig.Pomodoro = nil })
+	config.AppConfig.Pomodoro = &config.PomodoroSession{
+		Phase:        "work",
+		PhaseEndsAt:  time.Now().Add(10 * time.Minute),
+		WorkMinutes:  25,
+		BreakMinutes: 5,
+	}
+}
+
+func setBreakPhase(t *testing.T) {
+	t.Helper()
+	t.Cleanup(func() { config.AppConfig.Pomodoro = nil })
+	config.AppConfig.Pomodoro = &config.PomodoroSession{
+		Phase:        "break",
+		PhaseEndsAt:  time.Now().Add(5 * time.Minute),
+		WorkMinutes:  25,
+		BreakMinutes: 5,
+	}
+}
+
+func TestPomodoroStart_ValidBody(t *testing.T) {
+	t.Cleanup(func() { config.AppConfig.Pomodoro = nil })
+
+	body, _ := json.Marshal(map[string]int{"work_minutes": 25, "break_minutes": 5})
+	req := authRequest("POST", "/api/pomodoro/start", body)
+	rr := httptest.NewRecorder()
+	PomodoroStartHandler(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var result map[string]any
+	json.NewDecoder(rr.Body).Decode(&result)
+	if result["phase"] != "work" {
+		t.Errorf("expected phase=work, got %v", result["phase"])
+	}
+}
+
+func TestPomodoroStart_WorkMinutesTooLarge(t *testing.T) {
+	body, _ := json.Marshal(map[string]int{"work_minutes": 999, "break_minutes": 5})
+	req := authRequest("POST", "/api/pomodoro/start", body)
+	rr := httptest.NewRecorder()
+	PomodoroStartHandler(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rr.Code)
+	}
+}
+
+func TestPomodoroStart_BreakMinutesTooLarge(t *testing.T) {
+	body, _ := json.Marshal(map[string]int{"work_minutes": 25, "break_minutes": 999})
+	req := authRequest("POST", "/api/pomodoro/start", body)
+	rr := httptest.NewRecorder()
+	PomodoroStartHandler(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rr.Code)
+	}
+}
+
+func TestPomodoroStop_DuringBreak_Returns200(t *testing.T) {
+	setBreakPhase(t)
+
+	req := authRequest("DELETE", "/api/pomodoro", nil)
+	rr := httptest.NewRecorder()
+	PomodoroStopHandler(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if config.AppConfig.Pomodoro != nil {
+		t.Error("expected Pomodoro to be nil after stop")
+	}
+}
+
+func TestPomodoroStop_DuringWork_Returns423(t *testing.T) {
+	setWorkPhase(t)
+
+	req := authRequest("DELETE", "/api/pomodoro", nil)
+	rr := httptest.NewRecorder()
+	PomodoroStopHandler(rr, req)
+
+	if rr.Code != http.StatusLocked {
+		t.Errorf("expected 423, got %d", rr.Code)
+	}
+}
+
+func TestPauseHandler_LockedDuringWork_Returns423(t *testing.T) {
+	setWorkPhase(t)
+
+	body, _ := json.Marshal(map[string]int{"minutes": 15})
+	req := authRequest("POST", "/api/pause", body)
+	rr := httptest.NewRecorder()
+	PauseHandler(rr, req)
+
+	if rr.Code != http.StatusLocked {
+		t.Errorf("expected 423, got %d", rr.Code)
+	}
+}
+
+func TestStatusHandler_IncludesPomodoroState(t *testing.T) {
+	setWorkPhase(t)
+
+	req, _ := http.NewRequest("GET", "/api/status", nil)
+	rr := httptest.NewRecorder()
+	StatusHandler(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	var result map[string]any
+	json.NewDecoder(rr.Body).Decode(&result)
+	pom, ok := result["pomodoro"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected pomodoro field in status response, got %v", result)
+	}
+	if pom["phase"] != "work" {
+		t.Errorf("expected phase=work, got %v", pom["phase"])
+	}
+	if pom["locked"] != true {
+		t.Errorf("expected locked=true, got %v", pom["locked"])
+	}
+}
+
+func TestUpdateConfigHandler_LockedDuringWork_Returns423(t *testing.T) {
+	setWorkPhase(t)
+
+	cfg := config.Config{
+		Settings: config.Settings{AuthToken: config.AppConfig.Settings.AuthToken},
+		Groups:   map[string][]string{"g": {"example.com"}},
+		Rules:    []config.Rule{{Group: "g", IsActive: true, Schedules: map[string][]config.TimeSlot{}}},
+	}
+	body, _ := json.Marshal(cfg)
+	req := authRequest("POST", "/api/config/update", body)
+	rr := httptest.NewRecorder()
+	UpdateConfigHandler(rr, req)
+
+	if rr.Code != http.StatusLocked {
+		t.Errorf("expected 423, got %d: %s", rr.Code, rr.Body.String())
+	}
+}

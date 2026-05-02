@@ -482,6 +482,56 @@
             font-weight: 600;
             color: #856404;
         }
+
+        /* Pomodoro panel */
+        .pomodoro-panel {
+            background: #f0f2ff;
+            border: 1.5px solid #667eea;
+            border-radius: 10px;
+            padding: 16px 18px;
+        }
+        .pomodoro-panel.work-phase { background: #fff0f0; border-color: #dc3545; }
+        .pomodoro-panel.break-phase { background: #f0fff4; border-color: #28a745; }
+        .pomodoro-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+        .pomodoro-title { font-size: 14px; font-weight: 700; color: #343a40; }
+        .pomodoro-countdown {
+            font-size: 28px;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: -0.5px;
+            color: #343a40;
+            margin-bottom: 6px;
+        }
+        .pomodoro-start-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+        .pomodoro-start-row label { font-size: 12px; font-weight: 600; color: #495057; }
+        .pomodoro-start-row input[type=number] {
+            width: 54px;
+            padding: 5px 7px;
+            border: 1.5px solid #dee2e6;
+            border-radius: 6px;
+            font-size: 13px;
+            text-align: center;
+        }
+        .lock-overlay-msg {
+            background: #fff3cd;
+            border: 1px solid #ffe082;
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 12px;
+            color: #856404;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
@@ -503,6 +553,8 @@
 
     <!-- STATUS TAB -->
     <div id="statusTab" class="tab-content active">
+        <div class="section" id="pomodoroSection"></div>
+
         <div class="section">
             <div class="section-header">
                 <div class="section-title">Currently Blocked</div>
@@ -987,13 +1039,16 @@ async function loadStatus() {
 
         // Blocked list
         var blocked = Object.keys(data.blocked_domains || {}).filter(function(k) { return data.blocked_domains[k]; });
+        var sessionNote = (data.pomodoro && data.pomodoro.locked)
+            ? '<p style="font-size:12px;color:#dc3545;margin:8px 0 0;font-weight:600">🔴 Focus session active — all scheduled domains are forced on</p>'
+            : '';
         if (blocked.length === 0) {
-            contentEl.innerHTML = '<div class="status-empty">✓ No domains currently blocked</div>';
+            contentEl.innerHTML = '<div class="status-empty">✓ No domains currently blocked</div>' + sessionNote;
         } else {
             contentEl.innerHTML = '<ul class="blocked-list">' +
                 blocked.map(function(d) {
                     return '<li class="blocked-item"><span class="blocked-dot"></span>' + d + '</li>';
-                }).join('') + '</ul>';
+                }).join('') + '</ul>' + sessionNote;
         }
 
         // Last evaluated
@@ -1010,6 +1065,8 @@ async function loadStatus() {
 
         // Sync manage pause panel if already unlocked
         if (manageUnlocked) renderManagePause(data);
+
+        renderPomodoroPanel(data.pomodoro || null);
 
     } catch(e) {
         contentEl.innerHTML = '<div class="banner error">Error: ' + e.message + '</div>';
@@ -1369,11 +1426,13 @@ function renderManagePause(data) {
     var el = document.getElementById('managePauseContent');
     if (data.paused && data.paused_until) {
         var until = new Date(data.paused_until);
-        var fmt   = until.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+        var fmtTime = until.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
         el.innerHTML = '<div class="pause-active-row">' +
-            '<span>⏸ Paused until ' + fmt + '</span>' +
+            '<span>⏸ Paused until ' + fmtTime + '</span>' +
             '<button class="btn-success btn-sm" onclick="resumeBlocking()">▶ Resume now</button>' +
             '</div>';
+    } else if (data.pomodoro && data.pomodoro.locked) {
+        el.innerHTML = '<div class="lock-overlay-msg">🔒 Pause controls are locked during a Pomodoro work session.</div>';
     } else {
         el.innerHTML =
             '<p style="font-size:13px;color:#6c757d;margin-bottom:12px;">Pause all blocking for a set time.</p>' +
@@ -1414,6 +1473,105 @@ async function resumeBlocking() {
         loadManagePauseState();
     } catch(e) {
         showBanner('managePauseMsg', 'error', 'Error: ' + e.message);
+    }
+}
+
+// ── Pomodoro ──────────────────────────────────────────────────────────────────
+var pomodoroCountdownInterval = null;
+
+function renderPomodoroPanel(pomodoroData) {
+    var section = document.getElementById('pomodoroSection');
+    if (!section) return;
+
+    if (pomodoroCountdownInterval) {
+        clearInterval(pomodoroCountdownInterval);
+        pomodoroCountdownInterval = null;
+    }
+
+    // Treat an expired break as no session — scheduler will clear it on its next tick
+    if (pomodoroData && pomodoroData.phase === 'break' && new Date(pomodoroData.phase_ends_at) <= Date.now()) {
+        pomodoroData = null;
+    }
+
+    if (!pomodoroData) {
+        section.innerHTML =
+            '<div class="pomodoro-panel">' +
+            '<div class="pomodoro-header"><span class="pomodoro-title">Focus Session</span></div>' +
+            '<div class="pomodoro-start-row">' +
+            '<label>Work</label>' +
+            '<input type="number" id="pomWorkMin" value="25" min="1" max="120"> min' +
+            '<label style="margin-left:8px">Break</label>' +
+            '<input type="number" id="pomBreakMin" value="5" min="1" max="60"> min' +
+            '</div>' +
+            '<button class="btn-sm btn-success" onclick="startPomodoro()">▶ Start Focus Session</button>' +
+            '</div>';
+        return;
+    }
+
+    var phase    = pomodoroData.phase;
+    var endsAt   = new Date(pomodoroData.phase_ends_at);
+    var panelCls = phase === 'work' ? 'work-phase' : 'break-phase';
+    var label    = phase === 'work' ? '🔴 Work — blocking locked' : '🟢 Break — blocking unlocked';
+    var stopBtn  = phase === 'break'
+        ? '<button class="btn-sm btn-secondary" style="font-size:12px" onclick="stopPomodoro()">Stop session</button>'
+        : '<span style="font-size:11px;color:#dc3545;font-weight:700">🔒 Locked</span>';
+
+    section.innerHTML =
+        '<div class="pomodoro-panel ' + panelCls + '">' +
+        '<div class="pomodoro-header">' +
+        '<span class="pomodoro-title">' + label + '</span>' +
+        stopBtn +
+        '</div>' +
+        '<div class="pomodoro-countdown" id="pomCountdown">–:––</div>' +
+        '<div style="font-size:12px;color:#6c757d">' +
+        pomodoroData.work_minutes + ' min work / ' + pomodoroData.break_minutes + ' min break' +
+        '</div>' +
+        '</div>';
+
+    function tick() {
+        var remaining = Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
+        var m = Math.floor(remaining / 60);
+        var s = remaining % 60;
+        var el = document.getElementById('pomCountdown');
+        if (el) el.textContent = m + ':' + String(s).padStart(2, '0');
+        if (remaining === 0) {
+            clearInterval(pomodoroCountdownInterval);
+            pomodoroCountdownInterval = null;
+            setTimeout(loadStatus, 3000);
+        }
+    }
+    tick();
+    pomodoroCountdownInterval = setInterval(tick, 1000);
+}
+
+async function startPomodoro() {
+    var workMin  = parseInt(document.getElementById('pomWorkMin').value,  10);
+    var breakMin = parseInt(document.getElementById('pomBreakMin').value, 10);
+    try {
+        var res = await fetch('/api/pomodoro/start', {
+            method: 'POST',
+            headers: {'X-Auth-Token': authToken, 'Content-Type': 'application/json'},
+            body: JSON.stringify({work_minutes: workMin, break_minutes: breakMin})
+        });
+        var data = await res.json();
+        if (!res.ok) { alert(data.error || 'Failed to start session'); return; }
+        await loadStatus();
+    } catch(e) {
+        alert('Error: ' + e.message);
+    }
+}
+
+async function stopPomodoro() {
+    try {
+        var res = await fetch('/api/pomodoro', {
+            method: 'DELETE',
+            headers: {'X-Auth-Token': authToken}
+        });
+        var data = await res.json();
+        if (!res.ok) { alert(data.error || 'Cannot stop session'); return; }
+        await loadStatus();
+    } catch(e) {
+        alert('Error: ' + e.message);
     }
 }
 
