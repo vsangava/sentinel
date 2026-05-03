@@ -7,15 +7,17 @@ import (
 	"github.com/vsangava/sentinel/internal/pf"
 )
 
-// dohGroupName names the special group whose domains are blocked at the DNS layer
-// only and explicitly excluded from the pf IP-resolution path. The point is to
-// avoid IP-blocking common DoH endpoints like 1.1.1.1 / 8.8.8.8 — those same IPs
-// are routinely used as plain-DNS upstreams (including this daemon's backup_dns),
-// and an unconditional pf rule on them would break the daemon's own resolver.
+// dohGroupName names the special group of DNS-over-HTTPS / DNS-over-TLS endpoints.
+// Its domains get a different pf treatment from the regular blocked set: instead of
+// the all-port block used for site IPs, the resolved DoH/DoT IPs get port-restricted
+// rules (TCP/443 for DoH, TCP+UDP/853 for DoT). Plain DNS on UDP/53 is left reachable
+// so the daemon's own backup_dns (often 1.1.1.1:53 — same IP as a DoH endpoint) keeps
+// resolving real domains. See pf.GenerateAnchorContentMixed.
 const dohGroupName = "_doh"
 
 // StrictEnforcer composes DNS-proxy blocking with pf firewall blocking.
-// Domains in the _doh group are blocked at the DNS layer only.
+// Domains in the _doh group flow into a port-restricted pf section instead of the
+// all-port one — see reloadPF.
 type StrictEnforcer struct {
 	dns *DNSEnforcer
 	cfg config.Config
@@ -70,33 +72,38 @@ func (e *StrictEnforcer) Refresh() {
 	e.reloadPF()
 }
 
-// reloadPF rewrites the pf anchor from the current DNS-blocked set, excluding
-// domains in the _doh group (DNS-only). pf.ActivateBlock is an atomic anchor
-// overwrite, so no DeactivateBlock call is needed before it — and adding one
-// would briefly leave pf with no rules between the two reloads.
+// reloadPF rewrites the pf anchor from the current DNS-blocked set, splitting it
+// into a regular set (all-port pf rules) and a _doh set (port-restricted pf rules
+// for TCP/443 and TCP+UDP/853 only). Both sections live in one anchor file —
+// see pf.GenerateAnchorContentMixed.
+//
+// pf.ActivateBlockMixed is an atomic anchor overwrite, so no DeactivateBlock call
+// is needed before it — adding one would briefly leave pf with no rules between
+// the two reloads.
 //
 // Resolves a fresh config every call so a toggle of _doh.is_active or a domain
 // addition takes effect on the next tick without restarting the enforcer.
 func (e *StrictEnforcer) reloadPF() {
 	cfg := config.GetConfig()
-	skip := make(map[string]bool)
+	dohSet := make(map[string]bool)
 	for _, d := range cfg.ResolveGroup(dohGroupName) {
-		skip[d] = true
+		dohSet[d] = true
 	}
 
 	e.dns.mu.Lock()
-	domains := make([]string, 0, len(e.dns.blocked))
+	var blockDomains, dohDomains []string
 	for d := range e.dns.blocked {
-		if skip[d] {
-			continue
+		if dohSet[d] {
+			dohDomains = append(dohDomains, d)
+		} else {
+			blockDomains = append(blockDomains, d)
 		}
-		domains = append(domains, d)
 	}
 	e.dns.mu.Unlock()
 
-	if len(domains) == 0 {
+	if len(blockDomains) == 0 && len(dohDomains) == 0 {
 		pf.DeactivateBlock()
 		return
 	}
-	pf.ActivateBlock(domains, cfg.Settings.PrimaryDNS, cfg.Settings.BackupDNS)
+	pf.ActivateBlockMixed(blockDomains, dohDomains, cfg.Settings.PrimaryDNS, cfg.Settings.BackupDNS)
 }

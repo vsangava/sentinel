@@ -33,6 +33,77 @@ func TestGenerateAnchorContent_withIPs(t *testing.T) {
 	}
 }
 
+func TestGenerateAnchorContentMixed_bothSections(t *testing.T) {
+	blockIPs := []string{"1.2.3.4", "2001:db8::1"}
+	dohIPs := []string{"1.1.1.1", "2606:4700:4700::1111"}
+	got := GenerateAnchorContentMixed(blockIPs, dohIPs)
+
+	// Section 1: all-port for blockIPs, both families.
+	if !strings.Contains(got, "block drop out quick inet proto {tcp udp} from any to { 1.2.3.4 }") {
+		t.Errorf("section 1 missing inet all-port rule:\n%s", got)
+	}
+	if !strings.Contains(got, "block drop out quick inet6 proto {tcp udp} from any to { 2001:db8::1 }") {
+		t.Errorf("section 1 missing inet6 all-port rule:\n%s", got)
+	}
+
+	// Section 2: port-restricted for dohIPs.
+	if !strings.Contains(got, "block drop out quick inet proto tcp from any to { 1.1.1.1 } port 443") {
+		t.Errorf("section 2 missing inet DoH port 443 rule:\n%s", got)
+	}
+	if !strings.Contains(got, "block drop out quick inet proto {tcp udp} from any to { 1.1.1.1 } port 853") {
+		t.Errorf("section 2 missing inet DoT port 853 rule:\n%s", got)
+	}
+	if !strings.Contains(got, "block drop out quick inet6 proto tcp from any to { 2606:4700:4700::1111 } port 443") {
+		t.Errorf("section 2 missing inet6 DoH port 443 rule:\n%s", got)
+	}
+	if !strings.Contains(got, "block drop out quick inet6 proto {tcp udp} from any to { 2606:4700:4700::1111 } port 853") {
+		t.Errorf("section 2 missing inet6 DoT port 853 rule:\n%s", got)
+	}
+
+	// Comments make the two sections visually distinct in the anchor file.
+	if !strings.Contains(got, "section 1") || !strings.Contains(got, "section 2") {
+		t.Error("expected section header comments in mixed content")
+	}
+}
+
+func TestGenerateAnchorContentMixed_onlyDOH(t *testing.T) {
+	got := GenerateAnchorContentMixed(nil, []string{"1.1.1.1"})
+	if strings.Contains(got, "section 1") {
+		t.Errorf("should not emit section 1 header when blockIPs is empty:\n%s", got)
+	}
+	if !strings.Contains(got, "port 443") || !strings.Contains(got, "port 853") {
+		t.Errorf("section 2 must emit port-restricted rules:\n%s", got)
+	}
+	// Crucially: must NOT emit an unconditional all-port block on the DoH IP.
+	// That would also drop UDP/53 to 1.1.1.1, breaking the daemon's own backup_dns.
+	if strings.Contains(got, "to { 1.1.1.1 }\n") {
+		t.Errorf("DoH IP must not appear in any unrestricted-port rule:\n%s", got)
+	}
+}
+
+func TestGenerateAnchorContentMixed_onlyBlock(t *testing.T) {
+	got := GenerateAnchorContentMixed([]string{"5.6.7.8"}, nil)
+	if strings.Contains(got, "section 2") {
+		t.Errorf("should not emit section 2 header when dohIPs is empty:\n%s", got)
+	}
+	if !strings.Contains(got, "block drop out quick inet proto {tcp udp} from any to { 5.6.7.8 }") {
+		t.Errorf("section 1 missing all-port rule:\n%s", got)
+	}
+	if strings.Contains(got, "port 443") || strings.Contains(got, "port 853") {
+		t.Errorf("no port-restricted rules expected when dohIPs is empty:\n%s", got)
+	}
+}
+
+func TestGenerateAnchorContentMixed_bothEmpty(t *testing.T) {
+	got := GenerateAnchorContentMixed(nil, nil)
+	if !strings.Contains(got, "no IPs") {
+		t.Errorf("expected no-IPs comment when both sets empty, got %q", got)
+	}
+	if strings.Contains(got, "block drop out") {
+		t.Errorf("expected no block rules when both sets empty, got %q", got)
+	}
+}
+
 func TestGeneratePreview_structure(t *testing.T) {
 	p := GeneratePreview([]string{"google.com"}, "8.8.8.8:53")
 

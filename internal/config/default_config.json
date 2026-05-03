@@ -131,7 +131,7 @@
     },
     {
       "group": "_doh",
-      "is_active": false,
+      "is_active": true,
       "schedules": {
         "Monday":    [{"start": "00:00", "end": "23:59"}],
         "Tuesday":   [{"start": "00:00", "end": "23:59"}],

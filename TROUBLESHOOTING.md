@@ -195,13 +195,20 @@ sudo pfctl -s Anchors
 
 # What rules are active in our anchor?
 sudo pfctl -a sentinel -s rules
-# → Should show lines like:
-#   block drop out quick inet proto tcp from any to <__automatic_xxxxxxxx_0>
-#   block drop out quick inet proto udp from any to <__automatic_xxxxxxxx_1>
-#   block drop out quick inet6 proto tcp from any to <__automatic_xxxxxxxx_2>
-#   block drop out quick inet6 proto udp from any to <__automatic_xxxxxxxx_3>
+# → With _doh active, you'll see TWO sections of rules:
+#   Section 1 — all-port blocks for regular blocked-domain IPs:
+#     block drop out quick inet proto tcp from any to <__automatic_xxxxxxxx_0>
+#     block drop out quick inet proto udp from any to <__automatic_xxxxxxxx_1>
+#     block drop out quick inet6 proto tcp from any to <__automatic_xxxxxxxx_2>
+#     block drop out quick inet6 proto udp from any to <__automatic_xxxxxxxx_3>
+#   Section 2 — port-restricted blocks for DoH/DoT endpoints (TCP/443, TCP+UDP/853):
+#     block drop out quick inet proto tcp from any to <__automatic_xxxxxxxx_4> port = 443
+#     block drop out quick inet proto tcp from any to <__automatic_xxxxxxxx_5> port = 853
+#     block drop out quick inet proto udp from any to <__automatic_xxxxxxxx_6> port = 853
+#     (and the inet6 equivalents)
 # macOS automatically promotes inline IP lists to internal tables (__automatic_*).
 # "No rules" means either no domains are currently blocked, or anchor loading failed.
+# The raw anchor file at /etc/pf.anchors/sentinel has section comments labeling each.
 
 # What IPs are in the active tables?
 # (Replace the hash with what you see in "pfctl -a sentinel -s rules" above)

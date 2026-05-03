@@ -12,6 +12,7 @@ import (
 	"runtime"
 
 	"github.com/vsangava/sentinel/internal/config"
+	"github.com/vsangava/sentinel/internal/pf"
 )
 
 // Enforcer is implemented by every blocking backend.
@@ -29,8 +30,19 @@ type Enforcer interface {
 }
 
 // New returns the Enforcer matching the config's enforcement_mode.
+//
+// When the mode is hosts/dns, this also calls pf.RemoveAnchorIfPresent to clear any
+// stale pf anchor left behind by a previous strict-mode run that exited without a
+// graceful Stop (crash, SIGKILL, OOM). The graceful path already cleans pf via
+// StrictEnforcer.Teardown; this is the self-heal for the ungraceful path so a
+// downgrade from strict to hosts/dns can never silently inherit lingering firewall
+// rules.
 func New(cfg config.Config) Enforcer {
-	switch cfg.Settings.GetEnforcementMode() {
+	mode := cfg.Settings.GetEnforcementMode()
+	if mode != "strict" {
+		pf.RemoveAnchorIfPresent()
+	}
+	switch mode {
 	case "strict":
 		return NewStrictEnforcer(cfg)
 	case "dns":
