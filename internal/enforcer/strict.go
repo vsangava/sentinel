@@ -7,9 +7,15 @@ import (
 	"github.com/vsangava/sentinel/internal/pf"
 )
 
+// dohGroupName names the special group whose domains are blocked at the DNS layer
+// only and explicitly excluded from the pf IP-resolution path. The point is to
+// avoid IP-blocking common DoH endpoints like 1.1.1.1 / 8.8.8.8 — those same IPs
+// are routinely used as plain-DNS upstreams (including this daemon's backup_dns),
+// and an unconditional pf rule on them would break the daemon's own resolver.
+const dohGroupName = "_doh"
+
 // StrictEnforcer composes DNS-proxy blocking with pf firewall blocking.
-// pf enforcement is currently a stub; the enforcer degrades gracefully to
-// DNS-only until the pf package is fully implemented (see issue #12).
+// Domains in the _doh group are blocked at the DNS layer only.
 type StrictEnforcer struct {
 	dns *DNSEnforcer
 	cfg config.Config
@@ -39,18 +45,7 @@ func (e *StrictEnforcer) Activate(domains []string) error {
 	if err := e.dns.Activate(domains); err != nil {
 		return err
 	}
-	// Re-resolve ALL currently blocked domains on every activation, not just the
-	// newly added ones. CDN-backed sites rotate IPs frequently; refreshing from
-	// scratch each tick evicts stale addresses that would otherwise linger in the
-	// pf table until the block ends.
-	e.dns.mu.Lock()
-	allDomains := make([]string, 0, len(e.dns.blocked))
-	for d := range e.dns.blocked {
-		allDomains = append(allDomains, d)
-	}
-	e.dns.mu.Unlock()
-	pf.DeactivateBlock()
-	pf.ActivateBlock(allDomains, e.cfg.Settings.PrimaryDNS, e.cfg.Settings.BackupDNS)
+	e.reloadPF()
 	return nil
 }
 
@@ -58,17 +53,7 @@ func (e *StrictEnforcer) Deactivate(domains []string) error {
 	if err := e.dns.Deactivate(domains); err != nil {
 		return err
 	}
-	// Rebuild pf table from the remaining DNS-blocked set.
-	pf.DeactivateBlock()
-	e.dns.mu.Lock()
-	remaining := make([]string, 0, len(e.dns.blocked))
-	for d := range e.dns.blocked {
-		remaining = append(remaining, d)
-	}
-	e.dns.mu.Unlock()
-	if len(remaining) > 0 {
-		pf.ActivateBlock(remaining, e.cfg.Settings.PrimaryDNS, e.cfg.Settings.BackupDNS)
-	}
+	e.reloadPF()
 	return nil
 }
 
@@ -82,16 +67,36 @@ func (e *StrictEnforcer) DeactivateAll() error {
 // Called every scheduler tick so CDN IP rotations are picked up without waiting
 // for a domain set change to trigger Activate.
 func (e *StrictEnforcer) Refresh() {
+	e.reloadPF()
+}
+
+// reloadPF rewrites the pf anchor from the current DNS-blocked set, excluding
+// domains in the _doh group (DNS-only). pf.ActivateBlock is an atomic anchor
+// overwrite, so no DeactivateBlock call is needed before it — and adding one
+// would briefly leave pf with no rules between the two reloads.
+//
+// Resolves a fresh config every call so a toggle of _doh.is_active or a domain
+// addition takes effect on the next tick without restarting the enforcer.
+func (e *StrictEnforcer) reloadPF() {
+	cfg := config.GetConfig()
+	skip := make(map[string]bool)
+	for _, d := range cfg.ResolveGroup(dohGroupName) {
+		skip[d] = true
+	}
+
 	e.dns.mu.Lock()
 	domains := make([]string, 0, len(e.dns.blocked))
 	for d := range e.dns.blocked {
+		if skip[d] {
+			continue
+		}
 		domains = append(domains, d)
 	}
 	e.dns.mu.Unlock()
 
 	if len(domains) == 0 {
+		pf.DeactivateBlock()
 		return
 	}
-	pf.DeactivateBlock()
-	pf.ActivateBlock(domains, e.cfg.Settings.PrimaryDNS, e.cfg.Settings.BackupDNS)
+	pf.ActivateBlock(domains, cfg.Settings.PrimaryDNS, cfg.Settings.BackupDNS)
 }
