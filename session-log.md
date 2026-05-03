@@ -420,3 +420,35 @@ Together the two PRs delivered:
 Release `v0.1.14` created with comprehensive release notes. The release workflow triggered automatically and will attach macOS arm64, macOS amd64, and Windows amd64 binaries plus `install.sh`.
 
 **Wrap-up:** PRs #78 and #83 merged into main, release v0.1.14 live at https://github.com/vsangava/sentinel/releases/tag/v0.1.14. Chrome's DoH IP-upgrade bypass is now closed in strict mode.
+
+---
+
+## May 3 — Per-tick browser tab closer → v0.1.15
+**Session ID:** `streamed-firefly` · **PR:** #84 · **Release:** v0.1.15
+
+**Opening prompt:**
+> "review issue 81 and tell me what you think and if makes sense. You can read issue 77 for more context of all the problem we had to get the domain blocking right in strict mode."
+
+**What happened:**
+
+Issue #81 proposed running the AppleScript tab-closer on every scheduler tick instead of only at the unblocked → blocked transition. The premise: even after v0.1.14's CDN coverage and DoH port-restricted rules, strict mode still has fundamental gaps (Safari iCloud Private Relay, certain DoH-upgraded paths, geo-anycast IP mismatches), and the tab-closer is the only mode-agnostic, OS-level enforcement we have. The transition-only trigger also missed a real bug case: a tab opened *during* an active block window — even via a perfectly normal mid-window page load — was never closed because `activeBlocks` already contained the domain, so there was no transition to hook on.
+
+Reviewed and recommended shipping. The user confirmed with four refinements: (1) replace the transition trigger entirely (no double-running), (2) improve the notification copy, (3) filter the `_doh` group out of the browser probe (DoH endpoints aren't sites users visit with browsers), (4) make close + notify atomic in one osascript invocation.
+
+Implementation in `internal/scheduler/scheduler.go`:
+- New `runPerTickCloseTabs(blocked, cfg, probe)` invoked every tick after the enforcer block, gated by an injectable `browserTabProbe` (defaults to `getOpenBrowserDomains`).
+- New `browserTargetableDomains` filters out the `_doh` group via `cfg.ResolveGroup(enforcer.DohGroupName)`. `dohGroupName` was exported so the scheduler could reuse the constant from `internal/enforcer/strict.go` rather than re-declare the magic string.
+- `GenerateCloseTabsScript` now tracks a `closedCount` accumulator across all four browser blocks (Chrome / Safari / Arc / Brave) and emits a single trailing `display notification` ("Closed N tab(s) on facebook.com, tiktok.com" — or "across N sites" for >3 domains) when count > 0. One osascript invocation does both close and notify.
+- 9 new tests covering the script changes, the DoH filter, and the per-tick driver including a regression test for the issue #81 case (domain already in `activeBlocks`, no transition, but tab is open → close fires).
+
+The user asked mid-implementation whether the script handles incognito/private windows. Investigated each browser's AppleScript dictionary on disk:
+- **Chrome** — `scripting.sdef` defines `window.mode` with values `"normal"` / `"incognito"`; the `windows` enumeration includes incognito windows. ✅ Covered.
+- **Brave** — Chromium-based, inherits Chrome's scripting model. ✅ Almost certainly covered.
+- **Arc** — Chromium-based with a custom window architecture (Spaces, Little Arc); not installed locally to dump the sdef. ✅ Most likely covered.
+- **Safari** — `Safari.sdef` deliberately omits any private-browsing surface; private windows are hidden from AppleScript by Apple's design as a privacy guarantee. ❌ Cannot be closed via automation. The architectural fix is an MDM `SafariAllowPrivateBrowsing = false` payload.
+
+Documented the Safari limitation as a coverage table in `TROUBLESHOOTING.md §4 macOS AppleScript path`. Updated `DESIGN.md` (tick-loop pseudocode + AppleScript section), `README.md` (feature blurb), and `docs/index.html` (landing-page card) to reflect per-tick cadence and the bypass scenarios it addresses.
+
+CI failed once on the initial push with a parallel-test flake in `internal/testcli` (testcli and web both mutate `./config.json` with `UseLocalConfig = true`; race produces `unexpected end of JSON input`). Reproduced as a known issue independent of this change — a rerun passed cleanly. Worth flagging as a separate cleanup later: serialise the test packages that touch `./config.json`, or stop using the live config file for tests.
+
+**Wrap-up:** PR #84 merged into main, release v0.1.15 live at https://github.com/vsangava/sentinel/releases/tag/v0.1.15. The macOS tab closer is now the genuine OS-level backstop for whatever bypasses get past DNS / pf — at least for any tab that isn't in Safari Private Browsing.
