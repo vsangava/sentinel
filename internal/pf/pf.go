@@ -91,16 +91,68 @@ func resolveDomainIPsMulti(domain string, servers []string) []string {
 	return ips
 }
 
-// GenerateAnchorContent builds the pfctl anchor rules for the given IP list.
-// Pure function — no I/O, safe to call without root.
+// GenerateAnchorContent builds the pfctl anchor rules for the given IP list, blocking all
+// ports for every IP. Equivalent to GenerateAnchorContentMixed(ips, nil).
+//
 // IPs are inlined directly into block rules (one rule per address family) rather than
 // using a table declaration, because macOS pfctl rejects table declarations in
 // anchor files loaded via "pfctl -a anchor -f file".
 func GenerateAnchorContent(ips []string) string {
-	if len(ips) == 0 {
+	return GenerateAnchorContentMixed(ips, nil)
+}
+
+// GenerateAnchorContentMixed builds the pfctl anchor with two visually-separate sections:
+//
+//   - Section 1: all-port blocks for normal blockIPs (TCP+UDP, every port). This is the
+//     unchanged behavior used for regular blocked domains.
+//   - Section 2: port-restricted blocks for dohIPs that target only the well-known DNS-
+//     over-HTTPS (TCP/443) and DNS-over-TLS (TCP+UDP/853) ports. Plain DNS on UDP/53 stays
+//     reachable so the daemon's own backup_dns (typically 1.1.1.1:53) keeps working even
+//     when its IP is in the dohIPs set.
+//
+// Each section is split by address family because pfctl requires explicit inet/inet6
+// qualifiers when proto and address family are constrained together. Empty IP slices
+// produce no rules in their respective sections (no empty "from any to { }" emitted —
+// pfctl rejects that). If both lists are empty, returns the standard placeholder.
+//
+// Pure function — no I/O, safe to call without root.
+func GenerateAnchorContentMixed(blockIPs, dohIPs []string) string {
+	if len(blockIPs) == 0 && len(dohIPs) == 0 {
 		return "# no IPs to block\n"
 	}
-	var v4, v6 []string
+
+	blockV4, blockV6 := splitByFamily(blockIPs)
+	dohV4, dohV6 := splitByFamily(dohIPs)
+
+	var sb strings.Builder
+	if len(blockV4) > 0 || len(blockV6) > 0 {
+		sb.WriteString("# section 1: all-port blocks for resolved blocked-domain IPs\n")
+		if len(blockV4) > 0 {
+			sb.WriteString("block drop out quick inet proto {tcp udp} from any to { " + strings.Join(blockV4, " ") + " }\n")
+		}
+		if len(blockV6) > 0 {
+			sb.WriteString("block drop out quick inet6 proto {tcp udp} from any to { " + strings.Join(blockV6, " ") + " }\n")
+		}
+	}
+	if len(dohV4) > 0 || len(dohV6) > 0 {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("# section 2: port-restricted blocks for DoH (TCP/443) and DoT (TCP+UDP/853)\n")
+		sb.WriteString("# UDP/53 plain DNS is intentionally NOT blocked so the daemon's backup_dns keeps working.\n")
+		if len(dohV4) > 0 {
+			sb.WriteString("block drop out quick inet proto tcp from any to { " + strings.Join(dohV4, " ") + " } port 443\n")
+			sb.WriteString("block drop out quick inet proto {tcp udp} from any to { " + strings.Join(dohV4, " ") + " } port 853\n")
+		}
+		if len(dohV6) > 0 {
+			sb.WriteString("block drop out quick inet6 proto tcp from any to { " + strings.Join(dohV6, " ") + " } port 443\n")
+			sb.WriteString("block drop out quick inet6 proto {tcp udp} from any to { " + strings.Join(dohV6, " ") + " } port 853\n")
+		}
+	}
+	return sb.String()
+}
+
+func splitByFamily(ips []string) (v4, v6 []string) {
 	for _, ip := range ips {
 		if strings.Contains(ip, ":") {
 			v6 = append(v6, ip)
@@ -108,14 +160,7 @@ func GenerateAnchorContent(ips []string) string {
 			v4 = append(v4, ip)
 		}
 	}
-	var sb strings.Builder
-	if len(v4) > 0 {
-		sb.WriteString("block drop out quick inet proto {tcp udp} from any to { " + strings.Join(v4, " ") + " }\n")
-	}
-	if len(v6) > 0 {
-		sb.WriteString("block drop out quick inet6 proto {tcp udp} from any to { " + strings.Join(v6, " ") + " }\n")
-	}
-	return sb.String()
+	return
 }
 
 // GeneratePreview resolves IPs for each domain and builds anchor content without touching the system.
@@ -203,13 +248,47 @@ func RemoveAnchor() {
 	log.Printf("pf: anchor removed")
 }
 
-// ActivateBlock resolves IPs for the given domains, writes the anchor file, and loads it into pf.
-// Both primaryDNS and backupDNS (when distinct) are queried for every domain and the IPs unioned —
-// CDN edges return geo-different IPs to different resolvers, so the union widens coverage.
-// At minimum backupDNS is required when primaryDNS is the local proxy, which returns 0.0.0.0 for
-// any domain already in the DNS-block list.
+// RemoveAnchorIfPresent is a self-healing cleanup invoked when the daemon starts in
+// hosts/dns mode. If a previous strict-mode run was killed without graceful Stop (crash,
+// SIGKILL, OOM), the anchor file and pf.conf injection survive. This function detects
+// either residue and tears it down so non-strict modes don't silently inherit stale
+// firewall rules. No-op when both the anchor file and the pf.conf block are absent.
+func RemoveAnchorIfPresent() {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	_, fileErr := os.Stat(anchorFile)
+	pfConfHasMarker := false
+	if data, err := os.ReadFile(pfConf); err == nil && strings.Contains(string(data), markerBeg) {
+		pfConfHasMarker = true
+	}
+	if os.IsNotExist(fileErr) && !pfConfHasMarker {
+		return
+	}
+	log.Printf("pf: detected stale anchor state (file=%v, pf.conf marker=%v) — cleaning up", fileErr == nil, pfConfHasMarker)
+	RemoveAnchor()
+}
+
+// ActivateBlock resolves IPs for the given domains and writes an all-port pf block anchor.
+// Equivalent to ActivateBlockMixed(domains, nil, ...).
 func ActivateBlock(domains []string, primaryDNS, backupDNS string) {
-	if runtime.GOOS != "darwin" || len(domains) == 0 {
+	ActivateBlockMixed(domains, nil, primaryDNS, backupDNS)
+}
+
+// ActivateBlockMixed resolves IPs for both `domains` (regular blocked set) and
+// `dohDomains` (DNS-over-HTTPS / DoT endpoints) and writes a single anchor with two
+// sections — see GenerateAnchorContentMixed for the section layout.
+//
+// Both primaryDNS and backupDNS (when distinct) are queried for every domain and the
+// IPs unioned: CDN edges return geo-different answers per resolver, so the union widens
+// coverage. backupDNS is required at minimum when primaryDNS is the local proxy
+// (which returns 0.0.0.0 for any domain already in the DNS-block list).
+//
+// dohDomains get port-restricted treatment so the daemon's own use of public DoH IPs
+// (e.g., 1.1.1.1:53) for backup DNS is not broken — only TCP/443 (DoH) and TCP+UDP/853
+// (DoT) are dropped on those IPs.
+func ActivateBlockMixed(domains, dohDomains []string, primaryDNS, backupDNS string) {
+	if runtime.GOOS != "darwin" || (len(domains) == 0 && len(dohDomains) == 0) {
 		return
 	}
 
@@ -218,27 +297,15 @@ func ActivateBlock(domains []string, primaryDNS, backupDNS string) {
 		servers = append(servers, backupDNS)
 	}
 
-	resolved := make(map[string][]string, len(domains))
-	seen := make(map[string]bool)
-	var allIPs []string
+	blockIPs := resolveSetUnion(domains, servers)
+	dohIPs := resolveSetUnion(dohDomains, servers)
 
-	for _, d := range domains {
-		ips := resolveDomainIPsMulti(d, servers)
-		resolved[d] = ips
-		for _, ip := range ips {
-			if !seen[ip] {
-				seen[ip] = true
-				allIPs = append(allIPs, ip)
-			}
-		}
-	}
-
-	if len(allIPs) == 0 {
-		log.Printf("pf: no IPs resolved for domains %v — skipping activation", domains)
+	if len(blockIPs) == 0 && len(dohIPs) == 0 {
+		log.Printf("pf: no IPs resolved (block=%d, doh=%d domains) — skipping activation", len(domains), len(dohDomains))
 		return
 	}
 
-	content := GenerateAnchorContent(allIPs)
+	content := GenerateAnchorContentMixed(blockIPs, dohIPs)
 	if err := os.WriteFile(anchorFile, []byte(content), 0644); err != nil {
 		log.Printf("pf: write anchor file: %v", err)
 		return
@@ -259,12 +326,34 @@ func ActivateBlock(domains []string, primaryDNS, backupDNS string) {
 		}
 	}
 
-	// Kill existing outbound states to those IPs so cached connections are severed.
-	for _, ip := range allIPs {
+	// Kill existing outbound states to severed cached connections. Only the all-port
+	// block IPs are state-killed; DoH IPs are left alone because killing all states to
+	// 1.1.1.1 would also drop the daemon's own backup_dns sessions on UDP/53.
+	for _, ip := range blockIPs {
 		killStateToIP(ip)
 	}
 
-	log.Printf("pf: activated block for %d domains (%d IPs)", len(domains), len(allIPs))
+	log.Printf("pf: activated block for %d domains (%d IPs) + %d DoH endpoints (%d IPs)",
+		len(domains), len(blockIPs), len(dohDomains), len(dohIPs))
+}
+
+// resolveSetUnion resolves each domain against every server and returns the deduplicated
+// union of IPs. Empty input returns nil.
+func resolveSetUnion(domains, servers []string) []string {
+	if len(domains) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var out []string
+	for _, d := range domains {
+		for _, ip := range resolveDomainIPsMulti(d, servers) {
+			if !seen[ip] {
+				seen[ip] = true
+				out = append(out, ip)
+			}
+		}
+	}
+	return out
 }
 
 // DeactivateBlock clears the sentinel anchor by loading an empty rule set.
