@@ -393,3 +393,30 @@ Added a comprehensive strict mode diagnostics section to `TROUBLESHOOTING.md`, i
 - Known limitations: ≤60 s CDN gap, pre-existing connections, IPv6 must be covered
 
 **Wrap-up:** Six root-cause bugs in strict mode pf blocking fixed across `internal/pf/pf.go`, `internal/enforcer/` (all three backends), and `internal/scheduler/scheduler.go`. Strict mode now correctly resolves, loads, and periodically refreshes IP-level firewall rules. Testing confirmed discord.com blocked; facebook CDN rotation fix in place but requires further testing to confirm. Raised as PR #76.
+
+---
+
+## May 3 — CDN coverage, DoH firewall bypass fix, and strict-mode self-heal → v0.1.14
+**Session ID:** `a2f1c8d3`
+
+**Opening prompt:**
+> "merge both open PRs 78 and 80. create a new release next version and ensure to document the release notes"
+
+**What happened:**
+
+PR #78 (`fix(strict): comprehensive CDN/asset coverage + DoH opt-in group`) and PR #80 (`fix(strict): port-restricted pf rules for DoH/DoT + self-heal on mode downgrade`) were both open and ready. PR #78 targeted `main`; PR #80 stacked on #78's branch.
+
+Merged PR #78 first. GitHub auto-closed PR #80 when the base branch was deleted on merge — a known GitHub behavior for stacked PRs. Reopening and retargeting a closed PR via the API is blocked by GitHub, so a replacement PR (#83) was created for the same `fix/doh-pf-port-blocking` branch, now targeting `main` directly. CI passed, PR #83 was merged.
+
+Together the two PRs delivered:
+- **CDN/asset domain expansion** for social, videos, and games groups — apex-only lists grew to cover the CDN domains responsible for the bulk of page bytes (fbcdn.net, tiktokcdn.com, googlevideo.com, ytimg.com, steamcommunity.com, etc.)
+- **Multi-resolver IP union** — `ActivateBlock` queries both primary and backup DNS and unions the results, widening pf coverage for geo-distributed CDN edges
+- **`_doh` opt-in group** of 14 common DoH/DoT endpoints added to the default config
+- **Port-restricted two-section pf anchor** — section 1 all-port blocks for regular site IPs; section 2 TCP/443 + TCP+UDP/853 blocks for DoH/DoT IPs, leaving UDP/53 open so the daemon's own backup_dns keeps working
+- **`_doh` flipped to default-active** — with port-restricted pf rules in place, the risk of breaking backup_dns is gone
+- **Self-healing pf cleanup on mode downgrade** — `enforcer.New` calls `pf.RemoveAnchorIfPresent` for non-strict modes, catching stale anchor state left behind by a crash or SIGKILL
+- 4 new pf unit tests covering the mixed-anchor generation logic
+
+Release `v0.1.14` created with comprehensive release notes. The release workflow triggered automatically and will attach macOS arm64, macOS amd64, and Windows amd64 binaries plus `install.sh`.
+
+**Wrap-up:** PRs #78 and #83 merged into main, release v0.1.14 live at https://github.com/vsangava/sentinel/releases/tag/v0.1.14. Chrome's DoH IP-upgrade bypass is now closed in strict mode.
