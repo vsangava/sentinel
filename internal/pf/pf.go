@@ -36,8 +36,17 @@ type Preview struct {
 }
 
 // ResolveDomainIPs returns deduplicated A and AAAA addresses for domain using dnsServer (host:port).
-// Falls back to net.LookupHost if DNS query fails.
+// Skips unspecified addresses (0.0.0.0 / ::) — those are Sentinel's own blocked-domain responses
+// returned when primaryDNS happens to point at the local proxy.
 func ResolveDomainIPs(domain, dnsServer string) []string {
+	return resolveDomainIPsMulti(domain, []string{dnsServer})
+}
+
+// resolveDomainIPsMulti queries each server and returns the union of all A/AAAA
+// answers. The union widens IP coverage for CDN-fronted domains where each
+// resolver returns a different geographic POP. Resolvers are queried sequentially
+// (volume is small — handful of domains × handful of resolvers per tick).
+func resolveDomainIPsMulti(domain string, servers []string) []string {
 	seen := make(map[string]bool)
 	var ips []string
 
@@ -51,31 +60,33 @@ func ResolveDomainIPs(domain, dnsServer string) []string {
 	c := new(dns.Client)
 	c.Timeout = dnsTimeout
 
-	for _, qtype := range []uint16{dns.TypeA, dns.TypeAAAA} {
-		m := new(dns.Msg)
-		m.SetQuestion(dns.Fqdn(domain), qtype)
-		m.RecursionDesired = true
-
-		r, _, err := c.Exchange(m, dnsServer)
-		if err != nil || r == nil {
+	for _, server := range servers {
+		if server == "" {
 			continue
 		}
-		for _, ans := range r.Answer {
-			switch rr := ans.(type) {
-			case *dns.A:
-				// Skip 0.0.0.0 — Sentinel's own blocked-domain response.
-				if !rr.A.IsUnspecified() {
-					add(rr.A.String())
-				}
-			case *dns.AAAA:
-				// Skip :: — Sentinel's own blocked-domain response.
-				if !rr.AAAA.IsUnspecified() {
-					add(rr.AAAA.String())
+		for _, qtype := range []uint16{dns.TypeA, dns.TypeAAAA} {
+			m := new(dns.Msg)
+			m.SetQuestion(dns.Fqdn(domain), qtype)
+			m.RecursionDesired = true
+
+			r, _, err := c.Exchange(m, server)
+			if err != nil || r == nil {
+				continue
+			}
+			for _, ans := range r.Answer {
+				switch rr := ans.(type) {
+				case *dns.A:
+					if !rr.A.IsUnspecified() {
+						add(rr.A.String())
+					}
+				case *dns.AAAA:
+					if !rr.AAAA.IsUnspecified() {
+						add(rr.AAAA.String())
+					}
 				}
 			}
 		}
 	}
-
 
 	return ips
 }
@@ -193,11 +204,18 @@ func RemoveAnchor() {
 }
 
 // ActivateBlock resolves IPs for the given domains, writes the anchor file, and loads it into pf.
-// backupDNS is tried per-domain when primaryDNS returns no usable IPs (e.g. when primaryDNS is
-// the local proxy and the domain is already DNS-blocked).
+// Both primaryDNS and backupDNS (when distinct) are queried for every domain and the IPs unioned —
+// CDN edges return geo-different IPs to different resolvers, so the union widens coverage.
+// At minimum backupDNS is required when primaryDNS is the local proxy, which returns 0.0.0.0 for
+// any domain already in the DNS-block list.
 func ActivateBlock(domains []string, primaryDNS, backupDNS string) {
 	if runtime.GOOS != "darwin" || len(domains) == 0 {
 		return
+	}
+
+	servers := []string{primaryDNS}
+	if backupDNS != "" && backupDNS != primaryDNS {
+		servers = append(servers, backupDNS)
 	}
 
 	resolved := make(map[string][]string, len(domains))
@@ -205,10 +223,7 @@ func ActivateBlock(domains []string, primaryDNS, backupDNS string) {
 	var allIPs []string
 
 	for _, d := range domains {
-		ips := ResolveDomainIPs(d, primaryDNS)
-		if len(ips) == 0 && backupDNS != "" && backupDNS != primaryDNS {
-			ips = ResolveDomainIPs(d, backupDNS)
-		}
+		ips := resolveDomainIPsMulti(d, servers)
 		resolved[d] = ips
 		for _, ip := range ips {
 			if !seen[ip] {
@@ -230,13 +245,17 @@ func ActivateBlock(domains []string, primaryDNS, backupDNS string) {
 	}
 
 	// Load the anchor into the running pf.
-	// macOS pfctl exits 1 for "Use of -f option" and ALTQ warnings even on success;
-	// only treat it as a real failure when the output contains an actual error.
+	// macOS pfctl exits 1 for non-fatal warnings ("Use of -f option", ALTQ unsupported, etc.) even
+	// on successful loads; only treat it as a real failure when the output contains an actual error,
+	// but always log the warning so silent breakage doesn't go unnoticed.
 	if out, err := exec.Command("pfctl", "-a", anchorName, "-f", anchorFile).CombinedOutput(); err != nil {
 		msg := strings.TrimSpace(string(out))
 		if strings.Contains(msg, "syntax error") || strings.Contains(msg, "rules not loaded") {
 			log.Printf("pf: load anchor: %v: %s", err, msg)
 			return
+		}
+		if msg != "" {
+			log.Printf("pf: load anchor warning (treating as success): %v: %s", err, msg)
 		}
 	}
 
@@ -263,6 +282,10 @@ func DeactivateBlock() {
 		msg := strings.TrimSpace(string(out))
 		if strings.Contains(msg, "syntax error") || strings.Contains(msg, "rules not loaded") {
 			log.Printf("pf: deactivate reload: %v: %s", err, msg)
+			return
+		}
+		if msg != "" {
+			log.Printf("pf: deactivate warning (treating as success): %v: %s", err, msg)
 		}
 	}
 }
