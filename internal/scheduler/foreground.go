@@ -53,9 +53,18 @@ type ForegroundProbeGenerator interface {
 type MacOSForegroundProbeGenerator struct{}
 
 func (g *MacOSForegroundProbeGenerator) GenerateForegroundProbeScript() string {
-	// Per-browser URL fetches are wrapped individually so a single
-	// "Application isn't running" (-600) fails the inner block, not the whole
-	// probe — same defensive shape used by GenerateCloseTabsScript.
+	// Per-browser URL fetches are dispatched as nested `osascript -e` calls via
+	// `do shell script` rather than written as inline `tell application "X" to
+	// ...` blocks. Reason: AppleScript compiles the whole script up front, and
+	// `URL of active tab of front window` requires the target app's scripting
+	// dictionary at compile time. If the app isn't installed (e.g. Brave/Arc on
+	// most machines), compilation fails with -2741 "Expected end of line but
+	// found property" — and a `try` block can't catch a compile-time error, so
+	// the whole probe dies before the `if frontApp is "X"` runtime guard runs.
+	// Nesting via `do shell script "osascript -e ..."` isolates each app's
+	// terminology resolution into its own osascript process: only the branch
+	// that actually fires gets compiled, and a missing app errors only if it's
+	// somehow the frontmost (which can't happen if it isn't installed).
 	//
 	// Idle time comes from IOKit (HIDIdleTime in nanoseconds). It needs no
 	// special permission and is the standard idiom; AppleScript has no
@@ -78,19 +87,19 @@ func (g *MacOSForegroundProbeGenerator) GenerateForegroundProbeScript() string {
 
 		if frontApp is "Google Chrome" then
 			try
-				tell application "Google Chrome" to set activeURL to URL of active tab of front window
+				set activeURL to do shell script "osascript -e 'tell application \"Google Chrome\" to get URL of active tab of front window'"
 			end try
 		else if frontApp is "Safari" then
 			try
-				tell application "Safari" to set activeURL to URL of current tab of front window
+				set activeURL to do shell script "osascript -e 'tell application \"Safari\" to get URL of current tab of front window'"
 			end try
 		else if frontApp is "Arc" then
 			try
-				tell application "Arc" to set activeURL to URL of active tab of front window
+				set activeURL to do shell script "osascript -e 'tell application \"Arc\" to get URL of active tab of front window'"
 			end try
 		else if frontApp is "Brave Browser" then
 			try
-				tell application "Brave Browser" to set activeURL to URL of active tab of front window
+				set activeURL to do shell script "osascript -e 'tell application \"Brave Browser\" to get URL of active tab of front window'"
 			end try
 		end if
 
