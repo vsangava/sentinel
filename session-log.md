@@ -730,3 +730,47 @@ Tried `./sentinel --test-web` to curl `/api/version` locally and got 404 even th
 `TestVersionHandler_ReturnsCurrentVersion` saves the package var, sets a sentinel value, calls the handler, decodes the JSON, and restores via `defer`. Restoring matters because `version.Version` is module-global and the test runs alongside the rest of the web suite — leaving a stale value would leak into any later test that read it.
 
 **Wrap-up:** PR [#98](https://github.com/vsangava/sentinel/pull/98) merged to `main`; tag `v0.1.19` pushed and the GitHub release workflow published `sentinel-macos-arm64`, `sentinel-macos-amd64`, `sentinel-windows-amd64.exe`, and `install.sh` to <https://github.com/vsangava/sentinel/releases/tag/v0.1.19>. Updated README's dashboard section to call out the version pill. Auto-update'd users will see their dashboard show `v0.1.19` once they restart the service.
+
+## May 6 — Foreground-tracking fallout fixes → v0.1.20
+**Session ID:** `fix-foreground-v0120` · **PRs:** [#100](https://github.com/vsangava/sentinel/pull/100), [#101](https://github.com/vsangava/sentinel/pull/101)
+
+**Opening prompt:**
+> "there is an issue with pr 95. the newly added config option `enable_foreground_tracking` is not working or it is not clear how to set it. I am getting this error when trying to update it from web Manage tab with error `invalid JSON: json: cannot unmarshal string into Go struct field Settings.settings.enable_foreground_tracking of type bool`."
+
+**What happened:**
+
+Two distinct bugs surfaced from #95 — one about the field's *visibility* and one about the probe never running at all on most macOS installs.
+
+### Bug 1 — Config field type wasn't discoverable (#100)
+
+The user had typed `"enable_foreground_tracking": "true"` (string) instead of `true` (bool) and hit a Go unmarshal error. Reading the dashboard's Manage tab, the inline help mentioned the field name but not its type or value, and none of the four example/default config blocks across the repo (`internal/config/default_config.json`, the README *Example config*, the DESIGN.md `Settings` struct snippet, and the dashboard's `EXAMPLE_CONFIG`) showed it. Same gap existed for `dns_failure_mode`, which had been added earlier — present in the bootstrap default-config file but missing from every other example surface. PR #100 added both fields to all four locations with documented defaults (`enable_foreground_tracking: false`, `dns_failure_mode: "open"`). No behaviour change — both have `omitempty` JSON tags and Go zero-values match the documented defaults — but spelling them out doubles as type documentation.
+
+### Bug 2 — Probe AppleScript fails to compile when Arc/Brave aren't installed (#101)
+
+After #100 landed, the user fixed their config and immediately hit a new failure in scheduler logs:
+
+```
+scheduler: foreground probe: osascript exit 1: /tmp/df_probe.scpt:792:795: script error: Expected end of line but found property. (-2741)
+```
+
+Reproduced locally. The probe script in `internal/scheduler/foreground.go` emits all four browsers' URL-fetch logic inline as `tell application "X" to set activeURL to URL of active tab of front window`. AppleScript compiles the whole script up front and resolves application terminology against each named app's scripting dictionary at compile time. `URL of active tab of front window` is not generic AppleScript — `active tab` and `front window` are properties defined by Chrome/Arc/Brave's dictionary; `current tab` is Safari's. With Arc and Brave not installed (the common case), the compiler can't resolve those property terms and emits **-2741: Expected end of line but found property**. The surrounding `try` cannot catch this — it's a parse error, not a runtime error. Net effect: the probe died every tick, `foreground_minutes` stayed at 0 regardless of `enable_foreground_tracking: true`. **The opt-in feature shipped in v0.1.18 was effectively broken on every machine that didn't have all four browsers installed.**
+
+The existing close-tabs script (`scheduler.go:706` `getOpenBrowserDomains`) doesn't trip this because it only references `URL of t` where `t` is a local AppleScript variable — no app-specific dictionary needed at compile time. The probe needed `active tab` / `current tab` / `front window`, which are app-specific.
+
+### Fix shape (PR #101)
+
+Considered alternatives:
+- **`using terms from application "Google Chrome"` borrowing.** Works only if Chrome is installed — fails on a Safari-only or Arc-only machine.
+- **Block-form `tell application "X" ... end tell`.** Same compile-time terminology requirement as single-line form when inner content references app-specific properties (verified: -2741 still reproduces).
+- **`if application "X" is running then` outer guard.** Doesn't gate compilation either — dictionary still has to load (verified).
+- **Conditional script generation** (only emit branches for installed apps). More code than the win warrants.
+
+Chosen: dispatch each browser's URL fetch through `do shell script "osascript -e '...'"`. Each nested `osascript` invocation runs in its own process and only compiles its own one-liner. Terminology resolution happens lazily — only the branch matching the actual frontmost app ever runs, and a not-installed app can never be the frontmost, so it can never be reached. The outer probe script no longer references any browser-specific dictionary terms, so it compiles cleanly on any macOS install regardless of which browsers are present.
+
+Verified end-to-end by writing a one-shot test that calls `MacOSForegroundProbeGenerator.GenerateForegroundProbeScript()`, dumps the emitted bytes to `/tmp/df_probe_emitted.scpt`, and runs `osascript` on it — exits 0 with `Terminal\t\t<idle>` on a machine with only Chrome and Safari installed. Same machine reproduces -2741 against the pre-fix script.
+
+### Cost
+
+One extra `osascript` process per tick when a supported browser is frontmost. Negligible — the per-tick close path already shells out, this is one more, and only when the user is using a tracked browser.
+
+**Wrap-up:** Both PRs ([#100](https://github.com/vsangava/sentinel/pull/100), [#101](https://github.com/vsangava/sentinel/pull/101)) merged to `main`; tag `v0.1.20` pushed and the release workflow published `sentinel-macos-arm64`, `sentinel-macos-amd64`, `sentinel-windows-amd64.exe`, and `install.sh` to <https://github.com/vsangava/sentinel/releases/tag/v0.1.20>. Foreground tracking is now actually functional in the released build for any macOS install with at least one of the four supported browsers, not just installs that happen to have all four. Users on v0.1.18/v0.1.19 with `enable_foreground_tracking: true` need to upgrade — the metric was producing zero data on most machines.
