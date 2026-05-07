@@ -699,3 +699,34 @@ Two new test files. `proxy/foreground_test.go` covers schema invariants — DNS 
 - **#94** — Windows-side exploration. Documents the Win32 / UI-Automation / extension trade-offs and aligns on reusing the same `Kind: "foreground"` event shape so the dashboard renders without code changes.
 
 **Wrap-up:** Branch `feat/foreground-tab-tracking` opened with config flag, probe, parsing/matching helpers, scheduler wiring, usage-log schema bump, /api/usage and dashboard updates, and 18 new tests. Two follow-up issues filed (#93, #94). Docs updated across DESIGN.md, README.md, and docs/index.html.
+
+## May 6 — Display running version on web dashboard (issue #96) → v0.1.19
+**Session ID:** `feat-issue-96-version` · **PR:** [#98](https://github.com/vsangava/sentinel/pull/98)
+
+**Opening prompt:**
+> "implement issue 96. simple and straightforward so go ahead and implement, raise and merge pr, release next version."
+
+**What happened:**
+
+Issue #96 ("display current running version on web console") read trivially but exposed that the binary had no version string at all — `make` defaulted `VERSION ?= dev` for help text but never injected it into the binary, and there was no `internal/version` package to inject into.
+
+Three pieces:
+
+1. **`internal/version/version.go`** — single `var Version = "dev"` overridden via `-ldflags "-X github.com/vsangava/sentinel/internal/version.Version=..."`. Internal package keeps it from being importable outside the module (matches existing layering).
+2. **`/api/version`** — public, no auth. Same rationale as `/api/config`: the dashboard needs to render the version pill *before* it has bootstrapped the auth token. Added route to both `StartWebServer` and `StartTestWebServer` and updated the auth-middleware comment that previously named only `/api/config` as the public exception.
+3. **Dashboard pill** in the `app-header` — `margin-left: auto`, semi-transparent white, `font-variant-numeric: tabular-nums` so version digits don't reflow. Hidden by default; `loadVersion()` flips `hidden` after a successful fetch and silently no-ops on failure (so older daemons + newer dashboards just don't show the pill, no error).
+
+**Wiring:**
+
+- `Makefile` — added `LDFLAGS := -X github.com/vsangava/sentinel/internal/version.Version=$(VERSION)` and applied it to both `build` and `build-all` targets. `make build VERSION=v0.1.19` now bakes the value in.
+- `.github/workflows/release.yml` — pulls `${{ github.ref_name }}` (the pushed tag) and passes it via `-ldflags`. Added `shell: bash` on the build step because the matrix includes a Windows runner where `pwsh` quoting of `-ldflags "-X foo=bar"` is unreliable. Git Bash is preinstalled on `windows-latest`, so `shell: bash` works uniformly.
+
+**Verification gotcha:**
+
+Tried `./sentinel --test-web` to curl `/api/version` locally and got 404 even though `/api/config` returned valid JSON. `lsof` showed nothing on 8040, but `pgrep -lf sentinel` revealed PID 55371 running as root — the *installed daemon* on this machine, predating my changes, holding port 8040. My test instance silently failed to bind (logged in `/tmp/sentinel.log`) and the curl was hitting the production daemon. Couldn't `kill` it without sudo, so verified two other ways: a unit test (`TestVersionHandler_ReturnsCurrentVersion` toggles `version.Version`, hits the handler, asserts the JSON body), and `strings ./sentinel | grep ^v0.1.19` to confirm the ldflags value made it into the binary.
+
+**Tests:**
+
+`TestVersionHandler_ReturnsCurrentVersion` saves the package var, sets a sentinel value, calls the handler, decodes the JSON, and restores via `defer`. Restoring matters because `version.Version` is module-global and the test runs alongside the rest of the web suite — leaving a stale value would leak into any later test that read it.
+
+**Wrap-up:** PR [#98](https://github.com/vsangava/sentinel/pull/98) merged to `main`; tag `v0.1.19` pushed and the GitHub release workflow published `sentinel-macos-arm64`, `sentinel-macos-amd64`, `sentinel-windows-amd64.exe`, and `install.sh` to <https://github.com/vsangava/sentinel/releases/tag/v0.1.19>. Updated README's dashboard section to call out the version pill. Auto-update'd users will see their dashboard show `v0.1.19` once they restart the service.
