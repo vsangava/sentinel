@@ -796,3 +796,51 @@ Killed the running daemon, mkdir'd `/tmp/df-test`, dropped a synthetic config th
 User came back: "the chevron is too small / invisible. can you make it same size as the red dot that is shown in front of blocked domain names". Original implementation used a Unicode `▸` glyph at `font-size: 10px` — visible but thin and a bit anaemic next to the solid 7px red dot in the blocked list. Swapped it for a CSS-drawn triangle (the standard `border-top/bottom: 4px transparent + border-left: 7px solid #6c757d` recipe), `flex-shrink: 0` so it doesn't squeeze when the summary text wraps, and the existing `transform: rotate(90deg)` on `[open]` still works for the expansion animation. Visual weight now matches the dot.
 
 **Wrap-up:** PR [#103](https://github.com/vsangava/sentinel/pull/103) merged to `main`; tag `v0.1.21` pushed and the release workflow published `sentinel-macos-arm64`, `sentinel-macos-amd64`, `sentinel-windows-amd64.exe`, and `install.sh` to <https://github.com/vsangava/sentinel/releases/tag/v0.1.21>. The dashboard's blocked list now reflects what users actually want to see — scheduled sites foregrounded, infrastructure tucked away one click deep.
+
+## May 7 — Per-day usage-log rotation + 30-day retention (issue #105) → v0.1.22
+**Session ID:** `feat-issue-105-rotate-usagelog` · **PR:** [#106](https://github.com/vsangava/sentinel/pull/106)
+
+**Opening prompt:**
+> "foreground tab tracking isn't working. can you generate a snippet of applescript that is actually used in the program to do this job, so I can run it directly and see why or what is not working."
+
+**What happened:**
+
+Started as a debugging request — user couldn't see `foreground_minutes` populating in the dashboard's Usage tab. Pulled the verbatim probe body out of `MacOSForegroundProbeGenerator.GenerateForegroundProbeScript` (`internal/scheduler/foreground.go:55-108`), wrote it to `/tmp/df_probe_manual.scpt`, and walked the user through running it directly. Their first run printed `Terminal\t\t<idle>` because Terminal was frontmost while Chrome sat behind it. Wrote a second variant (`/tmp/df_probe_delayed.scpt`) with `delay 5` at the top so they could switch to Chrome before sampling. That confirmed the AppleScript path is healthy and the metric was zero by design — they'd been keeping Terminal/editor focused while a YouTube tab played in the background, which the foreground tracker correctly does not attribute time to.
+
+That conversation pivoted into a storage question: "writing one line per domain per min in usage.jsonl seems like it can take up a lot of space ... is it not efficient to summarize into a one line per domain per day in a per-day file?" Walked through the actual code (`internal/proxy/usagelog.go`) and grounded the discussion in what the read/write pattern *is* today: one ever-growing `usage.jsonl`, full-file decode every `/api/usage` render (even for "today"), full-file rewrite once a day to drop one day's worth of records, retention cap at 60 days. Foreground events are at most 1/min so they're not the volume driver — DNS is, with one event per blocked-group lookup.
+
+Laid out three options:
+
+1. **Per-day file rotation** (`usage-YYYY-MM-DD.jsonl`). Smallest change, biggest read-perf win for "today" (1/60th of the work), prune becomes `unlink`, no append-vs-prune race because today's file is never a prune candidate.
+2. Two-tier (raw today + summarised history). Larger change, useful only if a single day's file ever gets uncomfortable.
+3. Pure summary. Loses all intra-day fidelity forever.
+
+User asked a sharp follow-up — "won't read take a very long time to read and parse 60 files?" Walked the cost: total decoded bytes are identical for a 60d query, plus ~5 ms of file-open overhead for 60 files on APFS, all dwarfed by JSON-decode throughput. For "today" / "7d" / "30d" views the new path is strictly faster (skips files outside the window at the directory layer). Confirmed option 1 is a strict improvement, never a regression. They greenlit option 1 and asked to fold in a retention cut from 60 → 30 days at the same time.
+
+Filed [#105](https://github.com/vsangava/sentinel/issues/105) with the design (path helper keyed off event date, append/read/prune semantics, one-pass legacy migration), then implemented in PR #106.
+
+**Implementation shape:**
+
+- `internal/proxy/usagelog.go` — new `usageFilePathForDate(t)` returning `<configdir>/usage-YYYY-MM-DD.jsonl` (local date, matching how `ComputeGroup*Minutes` derives day boundaries from `t.Location()`); `parseUsageFileDate` rejects unrelated names (importantly the legacy `usage.jsonl`, since prune walks the directory and must not touch it); `listUsageFiles` returns matching files oldest-first by encoded date.
+- `AppendUsageEvent` opens the file for the event's date in append mode. No file-level lock — appends from the DNS proxy and the scheduler are atomic at the kernel level for writes ≤PIPE_BUF, same property the original single-file code relied on.
+- `ReadUsageEventsSince(since)` enumerates per-day files, drops files whose encoded date is strictly before `since`'s calendar day at the directory layer (cheap), then per-event filtering inside the boundary day. Read cost now scales with the requested range, not retention.
+- `PruneOldUsageEvents(maxAge)` parses date from each filename and `os.Remove`s strictly-older-than-cutoffDay files. No file rewriting, no race with appends.
+- `MigrateLegacyUsageFile()` opens `usage.jsonl` if present, splits lines into a `map[stamp][]string` keyed by event date, appends each bucket to its per-day file, removes the original on success. Idempotent: missing legacy file = no-op. Hooked into `program.run()` and the `--test-web` startup path right after `config.LoadConfig`.
+
+**Retention cut:**
+
+`scheduler.go` constant `60 * 24 * time.Hour` → `30 * 24 * time.Hour`. Dropped the "60 days" button from the dashboard's range picker (`internal/web/static/index.html`) and the `case "60d"` branch from `UsageHandler` (`internal/web/server.go`) — anything older than 30 days would have been pruned anyway, so the option was misleading. Updated DESIGN.md retention paragraph (now reads "30 days" + per-day filename pattern), README's `/api/usage` row, and a TROUBLESHOOTING note that referenced `usage.jsonl` by name.
+
+**Tests:**
+
+`internal/proxy/usagelog_test.go` (new) — six cases: path round-trip through `parseUsageFileDate`; rejection of unrelated filenames including the legacy `usage.jsonl`, malformed dates, and wrong extensions (load-bearing — prune walks the directory); append-then-read across a day boundary asserting two files exist oldest-first and the `since` filter returns the day-N tail plus all of day-N+1 in chronological order; prune at 30d removes -45d but keeps the -30d cutoff-edge file (cutoff inclusive on the keep side) and -1d/today; prune ignores `config.json`/`events.jsonl`/legacy `usage.jsonl`/random files even with retention pressure; migration of a multi-day legacy file produces three per-day files with correct contents and a second migration run is a no-op.
+
+`make test` and `make build` green. Existing proxy/scheduler/web tests untouched and still passing.
+
+**Gotchas worth flagging:**
+
+- **Date stamp is local time, not UTC.** Matches the bucket-day computation in `ComputeGroup*Minutes`. Both filename and bucket-day key off `t.Location()` so they can't disagree, but a user crossing a timezone change would see a brief cosmetic discontinuity in file naming around the transition.
+- **Legacy file is never a prune candidate.** `parseUsageFileDate` rejects the bare name `usage.jsonl`, so `PruneOldUsageEvents` walks past it. Lifecycle is owned by `MigrateLegacyUsageFile`, which removes it on first successful migration. If migration ever partially fails (some per-day files written, some not) the legacy file is preserved so the next start can retry — `O_APPEND` semantics mean the retry won't duplicate or lose events.
+- **CI vs the 0-byte file watcher.** When polling `gh release view --json isDraft` for the publish notification, used `until ... ; do sleep 30 ; done` so the wakeup arrives via the harness's task notification rather than spam-polling — saved a chunk of cache-warm budget on what turned out to be a ~3 minute build.
+
+**Wrap-up:** PR [#106](https://github.com/vsangava/sentinel/pull/106) merged to `main`; tag `v0.1.22` pushed and the release workflow published `sentinel-macos-arm64`, `sentinel-macos-amd64`, `sentinel-windows-amd64.exe`, and `install.sh` to <https://github.com/vsangava/sentinel/releases/tag/v0.1.22>. Foreground tracking continues to behave as designed (the original report was a misunderstanding of the metric, not a bug); usage logs are now per-day-rotated with 30-day retention, scaling read cost with the requested range and turning prune into an `unlink`.
