@@ -308,10 +308,10 @@ The `activeEnforcer` is wired by `main.go` via `scheduler.SetEnforcer(e)` before
 Each scheduler tick also:
 
 1. Calls `BuildGroupLookup(cfg)` — builds a `map[string]string` of domain → group for *all* configured domains (not just currently-blocked ones) and pushes it to `proxy.UpdateGroupLookup`. The proxy uses this to log non-blocked queries.
-2. Reads `usage.jsonl` for today's events and computes minutes-used per quota group via `proxy.ComputeAllGroupUsageMinutes`.
+2. Reads today's per-day usage log for events and computes minutes-used per quota group via `proxy.ComputeAllGroupUsageMinutes`.
 3. Passes the resulting `quotaUsage` map to `EvaluateRulesAtTime`, which blocks any group whose usage ≥ `DailyQuotaMinutes`.
 
-**Usage measurement:** `proxy/usagelog.go` records each non-blocked DNS query for a group domain as a `UsageEvent{TS, Domain, Group}` in `{configDir}/usage.jsonl`. Usage is aggregated in 5-minute buckets (`TS.Unix() / 300`) and usage minutes = `distinct buckets × 5`. The 5-minute window deduplicates Chrome's aggressive DNS re-resolution (TTL capped at 60s internally) while keeping granularity fine enough for quotas of 15+ minutes.
+**Usage measurement:** `proxy/usagelog.go` records each non-blocked DNS query for a group domain as a `UsageEvent{TS, Domain, Group}` in `{configDir}/usage-YYYY-MM-DD.jsonl` — one file per local calendar day, named after the event's date. Usage is aggregated in 5-minute buckets (`TS.Unix() / 300`) and usage minutes = `distinct buckets × 5`. The 5-minute window deduplicates Chrome's aggressive DNS re-resolution (TTL capped at 60s internally) while keeping granularity fine enough for quotas of 15+ minutes. Per-day rotation means the dashboard's "today" view only opens today's file, and prune is an `unlink` rather than a full-file rewrite.
 
 **Known limitations:**
 - Tracking requires `dns` or `strict` mode. In `hosts` mode the proxy never sees queries — see *Foreground tab tracking* below for the complementary signal that does work in `hosts` mode.
@@ -319,7 +319,7 @@ Each scheduler tick also:
 - Background tabs for SPAs (Reddit, YouTube) generate DNS traffic and consume quota even when the user is not actively browsing. The optional foreground-tab tracker described below sidesteps this for *measurement* (not for quota — the DNS-bucket signal still drives `DailyQuotaMinutes`).
 - The 5-minute bucket slightly over-counts sessions shorter than 5 minutes (a 2-minute visit counts as 5 minutes) and slightly under-counts if another tool (AdGuard Home, systemd-resolved) intercepts queries before they reach Sentinel.
 
-**Retention:** `usage.jsonl` is pruned once per calendar day to 60 days. The block event log (`events.jsonl`) is pruned to 30 days on the same tick.
+**Retention:** Per-day usage logs are pruned once per calendar day at 30 days — files older than the cutoff are deleted outright. The block event log (`events.jsonl`) is pruned to 30 days on the same tick. Pre-rotation deployments carrying a single `usage.jsonl` are migrated to per-day files on first start (one-pass split keyed by event date, original removed on success); the migration is idempotent and a no-op on fresh installs.
 
 ### Foreground tab tracking (macOS, opt-in)
 
@@ -332,7 +332,7 @@ runs a single AppleScript probe that returns `frontmost_app<TAB>active_url<TAB>i
 Idle comes from IOKit's `HIDIdleTime` (no entitlement needed). The active URL
 is read from `active tab of front window` for Chrome/Arc/Brave, and `current
 tab of front window` for Safari. The tick is recorded as a `UsageEvent{Kind: "foreground"}`
-in the same `usage.jsonl` only when **all** of these are true:
+in the same per-day usage log only when **all** of these are true:
 
 1. `idle_seconds < 60` — user is in front of the machine (not just leaving a tab open).
 2. `frontmost_app` is one of Chrome / Safari / Arc / Brave Browser.
@@ -351,7 +351,7 @@ event per tick. DNS-kind events are still aggregated in 5-minute buckets
 (`ComputeGroupUsageMinutes` filters by `IsDNSKind()`), so the two signals stay
 independent.
 
-**Backwards compatibility.** Pre-feature `usage.jsonl` entries have no `kind`
+**Backwards compatibility.** Pre-feature usage entries have no `kind`
 field. `UsageEvent.IsDNSKind()` treats empty `Kind` as `dns`, so existing logs
 keep aggregating into `used_minutes` without any migration step.
 

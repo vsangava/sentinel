@@ -802,7 +802,7 @@ The Status tab shows a warning badge on the quota section when the current mode 
 
 ### Usage tab shows zero data / Usage not accumulating
 
-1. Check enforcement mode — `hosts` mode never populates `usage.jsonl`.
+1. Check enforcement mode — `hosts` mode never populates the per-day usage logs (`usage-YYYY-MM-DD.jsonl`).
 2. Check that the daemon is running: `sudo ./sentinel status` (macOS) or check services.
 3. Check that the domains you expect to see are configured in a `groups` entry. Only domains in a configured group are tracked.
 4. The Usage tab shows DNS queries, not page views. If the site uses a long-lived connection (e.g. WebSocket) after the initial load, subsequent minutes may not generate new DNS lookups and usage will appear lower than expected.

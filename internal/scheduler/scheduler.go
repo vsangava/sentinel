@@ -606,7 +606,7 @@ func evaluateRules() {
 		if err := PruneOldEvents(30 * 24 * time.Hour); err != nil {
 			log.Printf("scheduler: prune events: %v", err)
 		}
-		if err := proxy.PruneOldUsageEvents(60 * 24 * time.Hour); err != nil {
+		if err := proxy.PruneOldUsageEvents(30 * 24 * time.Hour); err != nil {
 			log.Printf("scheduler: prune usage: %v", err)
 		}
 		lastPruneDay = today

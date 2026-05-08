@@ -437,7 +437,7 @@ All endpoints listen on `127.0.0.1:8040`. Every endpoint except the first requir
 | `/api/pf-preview` | GET / POST | Show the resolved IPs and `pf` anchor content (strict mode only) |
 | `/api/pause` | POST | Body `{"minutes": N}` (1–240) |
 | `/api/pause` | DELETE | Resume immediately |
-| `/api/usage` | GET | Per-group and per-domain DNS usage minutes; `?range=today\|7d\|30d\|60d` |
+| `/api/usage` | GET | Per-group and per-domain DNS usage minutes; `?range=today\|7d\|30d` |
 
 ---
 

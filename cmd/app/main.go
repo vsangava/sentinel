@@ -77,6 +77,10 @@ func (p *program) run() {
 		log.Printf("Config warning: %v", err)
 	}
 
+	if err := proxy.MigrateLegacyUsageFile(); err != nil {
+		log.Printf("Usage log migration warning: %v", err)
+	}
+
 	cfg := config.GetConfig()
 	mode := cfg.Settings.GetEnforcementMode()
 	log.Printf("Enforcement mode: %s", mode)
@@ -320,6 +324,10 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--test-web" {
 		// Use local config for test mode (no need for system paths)
 		config.UseLocalConfig = true
+
+		if err := proxy.MigrateLegacyUsageFile(); err != nil {
+			log.Printf("Usage log migration warning: %v", err)
+		}
 
 		log.Println("Starting test web UI on http://localhost:8040")
 		log.Println("Open your browser to http://localhost:8040 to test queries")

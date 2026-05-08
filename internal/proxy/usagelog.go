@@ -3,8 +3,11 @@ package proxy
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/vsangava/sentinel/internal/config"
@@ -42,13 +45,80 @@ func (e UsageEvent) IsDNSKind() bool {
 	return e.Kind == "" || e.Kind == KindDNS
 }
 
-func usageFilePath() string {
-	return filepath.Join(config.ConfigDir(), "usage.jsonl")
+// usageDateLayout is the date stamp used in per-day log filenames. Local time
+// matches how ComputeGroup*Minutes derives day boundaries from t.Location().
+const usageDateLayout = "2006-01-02"
+
+// legacyUsageFileName is the pre-rotation single-file log. Kept as a string
+// constant so the migration path and the prune path agree on what to leave
+// alone (prune must NOT delete this file — migration is responsible).
+const legacyUsageFileName = "usage.jsonl"
+
+// usageFilePathForDate returns the per-day log path for the date portion of t,
+// in t's own timezone. Filename shape: usage-YYYY-MM-DD.jsonl.
+func usageFilePathForDate(t time.Time) string {
+	return filepath.Join(config.ConfigDir(), "usage-"+t.Format(usageDateLayout)+".jsonl")
 }
 
-// AppendUsageEvent appends a single usage event to the JSONL log. Best-effort.
+// parseUsageFileDate extracts the date encoded in a per-day log filename.
+// Returns ok=false if the name doesn't match the rotation pattern — callers
+// use this to skip unrelated files (including the legacy single file).
+func parseUsageFileDate(name string) (time.Time, bool) {
+	const prefix = "usage-"
+	const suffix = ".jsonl"
+	if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, suffix) {
+		return time.Time{}, false
+	}
+	stamp := strings.TrimSuffix(strings.TrimPrefix(name, prefix), suffix)
+	d, err := time.ParseInLocation(usageDateLayout, stamp, time.Local)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return d, true
+}
+
+// listUsageFiles returns per-day log files in the config dir, oldest-first by
+// the date encoded in the filename. Files whose names don't match the
+// rotation pattern (including the legacy usage.jsonl) are skipped.
+func listUsageFiles() ([]string, error) {
+	dir := config.ConfigDir()
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	type dated struct {
+		path string
+		when time.Time
+	}
+	var found []dated
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		when, ok := parseUsageFileDate(e.Name())
+		if !ok {
+			continue
+		}
+		found = append(found, dated{path: filepath.Join(dir, e.Name()), when: when})
+	}
+	sort.Slice(found, func(i, j int) bool { return found[i].when.Before(found[j].when) })
+	out := make([]string, len(found))
+	for i, f := range found {
+		out[i] = f.path
+	}
+	return out, nil
+}
+
+// AppendUsageEvent appends a single usage event to the per-day JSONL log. The
+// file is opened in append mode and closed on each call — appends from the DNS
+// proxy and the scheduler are atomic at the kernel level for writes ≤PIPE_BUF
+// so no file-level lock is needed. Best-effort.
 func AppendUsageEvent(e UsageEvent) error {
-	f, err := os.OpenFile(usageFilePath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	path := usageFilePathForDate(e.TS)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}
@@ -56,10 +126,45 @@ func AppendUsageEvent(e UsageEvent) error {
 	return json.NewEncoder(f).Encode(e)
 }
 
-// ReadUsageEventsSince returns all usage events with TS strictly after since.
-// A zero since means no lower bound.
+// ReadUsageEventsSince returns all usage events with TS strictly after since,
+// across every per-day log on disk. Files outside the requested window are
+// skipped at the directory-listing layer so the read cost scales with the
+// requested range, not with retention. A zero since means no lower bound.
 func ReadUsageEventsSince(since time.Time) ([]UsageEvent, error) {
-	path := usageFilePath()
+	files, err := listUsageFiles()
+	if err != nil {
+		return nil, err
+	}
+
+	// Cheap directory-level skip: drop files whose date is strictly before the
+	// calendar day containing `since`. The per-event TS check below is still
+	// authoritative for the partial-day boundary.
+	var sinceDay time.Time
+	if !since.IsZero() {
+		sinceDay = time.Date(since.Year(), since.Month(), since.Day(), 0, 0, 0, 0, since.Location())
+	}
+
+	var events []UsageEvent
+	for _, path := range files {
+		if !since.IsZero() {
+			when, ok := parseUsageFileDate(filepath.Base(path))
+			if ok && when.Before(sinceDay) {
+				continue
+			}
+		}
+		fileEvents, err := readUsageFile(path, since)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, fileEvents...)
+	}
+	return events, nil
+}
+
+// readUsageFile decodes one per-day log, applying the per-event since filter.
+// Malformed lines are skipped silently — the log is best-effort and a single
+// torn write must not poison the entire range.
+func readUsageFile(path string, since time.Time) ([]UsageEvent, error) {
 	f, err := os.Open(path)
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -68,7 +173,6 @@ func ReadUsageEventsSince(since time.Time) ([]UsageEvent, error) {
 		return nil, err
 	}
 	defer f.Close()
-
 	var events []UsageEvent
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
@@ -84,45 +188,92 @@ func ReadUsageEventsSince(since time.Time) ([]UsageEvent, error) {
 	return events, scanner.Err()
 }
 
-// PruneOldUsageEvents rewrites the usage log keeping only entries within maxAge.
+// PruneOldUsageEvents removes per-day log files whose date is strictly older
+// than now-maxAge. Per-day rotation makes this an O(deleted-files) `unlink`
+// rather than a full-file rewrite, and there's no append-vs-prune race
+// because today's file is never a prune candidate.
 func PruneOldUsageEvents(maxAge time.Duration) error {
-	path := usageFilePath()
-	f, err := os.Open(path)
+	files, err := listUsageFiles()
+	if err != nil {
+		return err
+	}
+	cutoff := time.Now().Add(-maxAge)
+	cutoffDay := time.Date(cutoff.Year(), cutoff.Month(), cutoff.Day(), 0, 0, 0, 0, cutoff.Location())
+	for _, path := range files {
+		when, ok := parseUsageFileDate(filepath.Base(path))
+		if !ok {
+			continue
+		}
+		if when.Before(cutoffDay) {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("remove %s: %w", path, err)
+			}
+		}
+	}
+	return nil
+}
+
+// MigrateLegacyUsageFile splits a pre-rotation usage.jsonl into per-day files
+// and removes the original on success. No-op if the legacy file doesn't exist
+// (which is the steady state on any machine that's already rotated, or any
+// fresh install). Idempotent — re-running after success finds nothing to do.
+//
+// Failure mode is conservative: if any per-day write fails, the legacy file is
+// left in place so the daemon can re-attempt on next start. Per-day files
+// already written stay; AppendUsageEvent's O_APPEND semantics mean a partial
+// migration plus normal operation will not duplicate or lose events.
+func MigrateLegacyUsageFile() error {
+	legacyPath := filepath.Join(config.ConfigDir(), legacyUsageFileName)
+	f, err := os.Open(legacyPath)
 	if os.IsNotExist(err) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
+	defer f.Close()
 
-	cutoff := time.Now().Add(-maxAge)
-	var kept []UsageEvent
+	perDay := make(map[string][]string)
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
+		line := scanner.Bytes()
 		var e UsageEvent
-		if err := json.Unmarshal(scanner.Bytes(), &e); err != nil {
+		if err := json.Unmarshal(line, &e); err != nil {
 			continue
 		}
-		if e.TS.After(cutoff) {
-			kept = append(kept, e)
-		}
+		key := e.TS.Format(usageDateLayout)
+		perDay[key] = append(perDay[key], string(line))
 	}
-	f.Close()
 	if err := scanner.Err(); err != nil {
-		return err
+		return fmt.Errorf("scan legacy usage log: %w", err)
 	}
 
-	tmp := path + ".tmp"
-	out, err := os.Create(tmp)
+	for stamp, lines := range perDay {
+		path := filepath.Join(config.ConfigDir(), "usage-"+stamp+".jsonl")
+		if err := appendLines(path, lines); err != nil {
+			return fmt.Errorf("write %s: %w", path, err)
+		}
+	}
+
+	f.Close()
+	if err := os.Remove(legacyPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove legacy usage log: %w", err)
+	}
+	return nil
+}
+
+func appendLines(path string, lines []string) error {
+	out, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}
-	enc := json.NewEncoder(out)
-	for _, e := range kept {
-		enc.Encode(e)
+	defer out.Close()
+	for _, l := range lines {
+		if _, err := out.WriteString(l + "\n"); err != nil {
+			return err
+		}
 	}
-	out.Close()
-	return os.Rename(tmp, path)
+	return nil
 }
 
 // bucketKey returns the 5-minute bucket key for a timestamp.

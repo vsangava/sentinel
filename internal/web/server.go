@@ -556,10 +556,12 @@ func EventsHandler(w http.ResponseWriter, r *http.Request) {
 
 // UsageHandler handles GET /api/usage.
 // Query params:
-//   - range: "today" (default) | "7d" | "30d" | "60d"
+//   - range: "today" (default) | "7d" | "30d"
 //
 // Returns per-group and per-domain usage minutes for the requested range,
 // bucketed in 5-minute windows to avoid counting idle DNS re-resolution.
+// 30 days is the retention floor — anything older has been pruned, so a
+// "60d" query would just return the same result as "30d".
 func UsageHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -571,8 +573,6 @@ func UsageHandler(w http.ResponseWriter, r *http.Request) {
 		since = now.AddDate(0, 0, -7)
 	case "30d":
 		since = now.AddDate(0, 0, -30)
-	case "60d":
-		since = now.AddDate(0, 0, -60)
 	default:
 		// "today" — from start of calendar day
 		since = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Add(-time.Second)
