@@ -174,6 +174,41 @@
         }
         .status-meta { font-size: 11px; color: #adb5bd; margin-top: 8px; }
 
+        /* DoH disclosure */
+        .doh-details { margin-top: 12px; }
+        .doh-details > summary {
+            cursor: pointer;
+            list-style: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            color: #6c757d;
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            user-select: none;
+        }
+        .doh-details > summary:hover { background: #f1f3f5; color: #495057; }
+        .doh-details > summary::-webkit-details-marker { display: none; }
+        .doh-details > summary::before {
+            content: '';
+            width: 0;
+            height: 0;
+            border-top: 4px solid transparent;
+            border-bottom: 4px solid transparent;
+            border-left: 7px solid #6c757d;
+            transition: transform 0.15s ease;
+            flex-shrink: 0;
+        }
+        .doh-details[open] > summary::before { transform: rotate(90deg); }
+        .doh-details > summary .doh-summary-hint {
+            color: #adb5bd;
+            font-weight: 400;
+        }
+        .doh-details .blocked-list { margin-top: 8px; }
+
         /* Upcoming */
         .upcoming-list { display: flex; flex-direction: column; }
         .upcoming-item {
@@ -1151,19 +1186,48 @@ async function loadStatus() {
             pauseEl.innerHTML = '';
         }
 
-        // Blocked list
+        // Blocked list — partition into user-tracked sites and the _doh
+        // infrastructure group. The DoH list is hidden by default since it's
+        // typically a long, always-on list of resolver endpoints (Google,
+        // Cloudflare, Quad9, …) that crowds out the rule-driven blocks the
+        // user actually scheduled.
         var blocked = Object.keys(data.blocked_domains || {}).filter(function(k) { return data.blocked_domains[k]; });
+        var dohSet = {};
+        var dohList = (liveConfig && liveConfig.groups && liveConfig.groups._doh) || [];
+        for (var di = 0; di < dohList.length; di++) dohSet[dohList[di]] = true;
+        var userBlocked = blocked.filter(function(d) { return !dohSet[d]; });
+        var dohBlocked  = blocked.filter(function(d) { return  dohSet[d]; });
+
         var sessionNote = (data.pomodoro && data.pomodoro.locked)
             ? '<p style="font-size:12px;color:#dc3545;margin:8px 0 0;font-weight:600">🔴 Focus session active — all scheduled domains are forced on</p>'
             : '';
-        if (blocked.length === 0) {
-            contentEl.innerHTML = '<div class="status-empty">✓ No domains currently blocked</div>' + sessionNote;
-        } else {
-            contentEl.innerHTML = '<ul class="blocked-list">' +
-                blocked.map(function(d) {
+
+        var renderItems = function(list) {
+            return '<ul class="blocked-list">' +
+                list.map(function(d) {
                     return '<li class="blocked-item"><span class="blocked-dot"></span>' + d + '</li>';
-                }).join('') + '</ul>' + sessionNote;
+                }).join('') + '</ul>';
+        };
+
+        var html = '';
+        if (blocked.length === 0) {
+            html += '<div class="status-empty">✓ No domains currently blocked</div>';
+        } else if (userBlocked.length === 0) {
+            html += '<div class="status-empty">✓ No scheduled domains currently blocked</div>';
+        } else {
+            html += renderItems(userBlocked);
         }
+
+        if (dohBlocked.length > 0) {
+            html += '<details class="doh-details">' +
+                '<summary>' + dohBlocked.length + ' DoH/DoT endpoint' + (dohBlocked.length === 1 ? '' : 's') +
+                ' <span class="doh-summary-hint">(infrastructure — click to expand)</span>' +
+                '</summary>' +
+                renderItems(dohBlocked) +
+                '</details>';
+        }
+
+        contentEl.innerHTML = html + sessionNote;
 
         // Last evaluated
         if (data.last_evaluated) {
