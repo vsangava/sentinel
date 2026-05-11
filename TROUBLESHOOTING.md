@@ -465,11 +465,11 @@ log show --predicate 'process == "sentinel"' --last 1h
 log show --predicate 'process == "sentinel"' --last 1h | grep -E "scheduler|hosts|dns"
 ```
 
-If the service was installed via `kardianos/service` defaults, the launchd plist is at `~/Library/LaunchAgents/com.github.sentinel.plist`:
+Setup runs as root, so `kardianos/service` installs a system-wide LaunchDaemon plist at `/Library/LaunchDaemons/com.github.sentinel.plist` (not a per-user LaunchAgent — the daemon needs to bind port 53 and modify `/etc/hosts`):
 
 ```bash
-cat ~/Library/LaunchAgents/com.github.sentinel.plist
-launchctl print system/com.github.sentinel
+sudo cat /Library/LaunchDaemons/com.github.sentinel.plist
+sudo launchctl print system/com.github.sentinel
 ```
 
 ### Windows
@@ -502,8 +502,8 @@ The normal happy path is `sudo ./sentinel install && sudo ./sentinel start`. If 
 ```bash
 sudo ./sentinel install
 # Verify on macOS:
-ls -la ~/Library/LaunchAgents/com.github.sentinel.plist
-launchctl list | grep sentinel
+sudo ls -la /Library/LaunchDaemons/com.github.sentinel.plist
+sudo launchctl list | grep sentinel
 ```
 
 ```bash
@@ -527,8 +527,8 @@ sudo ./sentinel stop
 ```bash
 sudo ./sentinel uninstall
 # Verify:
-ls ~/Library/LaunchAgents/com.github.sentinel.plist  # should be gone
-launchctl list | grep sentinel                       # should be empty
+sudo ls /Library/LaunchDaemons/com.github.sentinel.plist  # should be gone
+sudo launchctl list | grep sentinel                       # should be empty
 ```
 
 #### Restarting after a binary update
@@ -699,8 +699,8 @@ sudo ./sentinel install
 If `uninstall` claims it isn't installed, the plist is dangling:
 
 ```bash
-launchctl unload ~/Library/LaunchAgents/com.github.sentinel.plist
-rm ~/Library/LaunchAgents/com.github.sentinel.plist
+sudo launchctl unload /Library/LaunchDaemons/com.github.sentinel.plist
+sudo rm /Library/LaunchDaemons/com.github.sentinel.plist
 sudo ./sentinel install
 ```
 
@@ -715,7 +715,7 @@ If `stop` hangs or fails, force it:
 
 ```bash
 sudo pkill -f "sentinel"
-launchctl unload ~/Library/LaunchAgents/com.github.sentinel.plist
+sudo launchctl unload /Library/LaunchDaemons/com.github.sentinel.plist
 sudo ./sentinel uninstall
 ```
 
