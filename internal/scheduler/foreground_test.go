@@ -173,6 +173,31 @@ func TestHostFromBrowserWindowTitle(t *testing.T) {
 	}
 }
 
+func TestNormalizeAddressBarValue(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+	}{
+		{"scheme-elided host+path gets https", "youtube.com/watch?v=abc", "https://youtube.com/watch?v=abc"},
+		{"bare host gets https", "music.youtube.com", "https://music.youtube.com"},
+		{"already https untouched", "https://www.youtube.com/", "https://www.youtube.com/"},
+		{"http untouched", "http://reddit.com", "http://reddit.com"},
+		{"chrome internal untouched", "chrome://settings", "chrome://settings"},
+		{"about:blank untouched", "about:blank", "about:blank"},
+		{"view-source untouched", "view-source:https://example.com", "view-source:https://example.com"},
+		{"host with explicit port gets https", "example.com:8443/admin", "https://example.com:8443/admin"},
+		{"empty stays empty", "", ""},
+		{"whitespace trimmed", "  reddit.com  ", "https://reddit.com"},
+		{"typed search query gets https (extractHost will reject it later)", "how to focus", "https://how to focus"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := normalizeAddressBarValue(c.in); got != c.want {
+				t.Errorf("normalizeAddressBarValue(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
 func TestGenerateForegroundProbeScript_IncludesAllBrowsers(t *testing.T) {
 	g := &MacOSForegroundProbeGenerator{}
 	script := g.GenerateForegroundProbeScript()

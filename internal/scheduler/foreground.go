@@ -285,6 +285,27 @@ func hostFromBrowserWindowTitle(title string) string {
 	return "https://" + host
 }
 
+// schemeColonRe matches the schemeless-but-prefixed addresses a browser address
+// bar can show (e.g. "about:blank", "view-source:...", "data:..."). These keep
+// their prefix so extractHost — which only accepts http(s) — drops them.
+var schemeColonRe = regexp.MustCompile(`^(about|chrome|edge|view-source|data|javascript|mailto|blob|chrome-extension):`)
+
+// normalizeAddressBarValue turns an address-bar display string into something
+// extractHost can parse. Chromium's "steady state" omnibox elides "https://"
+// (and "www."), so "youtube.com/watch?v=x" needs a synthesised scheme; values
+// that already carry one — "https://...", "chrome://...", "about:..." — are
+// returned untouched.
+func normalizeAddressBarValue(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return ""
+	}
+	if strings.Contains(v, "://") || schemeColonRe.MatchString(v) {
+		return v
+	}
+	return "https://" + v
+}
+
 // isSupportedBrowser reports whether name is one of the browsers the probe
 // can read tab URLs from.
 func isSupportedBrowser(name string) bool {

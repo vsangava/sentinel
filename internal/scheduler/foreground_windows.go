@@ -8,20 +8,24 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/vsangava/sentinel/internal/config"
 )
 
-// Windows foreground probe — the "start simple" path for issue #94. It reads:
+// Windows foreground probe for issue #94. Each tick it:
 //
-//   - the foreground window (GetForegroundWindow)
-//   - the process behind it, to decide if it's a tracked browser
-//     (GetWindowThreadProcessId → OpenProcess → QueryFullProcessImageName)
-//   - the window title, and a best-effort host from it (hostFromBrowserWindowTitle)
-//   - idle time (GetLastInputInfo vs GetTickCount — the Win32 analogue of macOS
-//     HIDIdleTime)
-//
-// It does NOT read the real address-bar URL — that needs UI Automation and
-// lands in a follow-up. Until then this populates foreground_minutes only for
-// the subset of pages whose window title contains a domain.
+//   - finds the foreground window (GetForegroundWindow)
+//   - identifies the owning process, to decide if it's a tracked browser —
+//     chrome.exe / msedge.exe (GetWindowThreadProcessId → OpenProcess →
+//     QueryFullProcessImageName)
+//   - reads the active tab's address:
+//       · if settings.windows_foreground_use_uia is on, via UI Automation
+//         (windowsAddressBarURL — the accurate path)
+//       · otherwise (or if UIA returns nothing) via a window-title heuristic
+//         (hostFromBrowserWindowTitle — coarse: only catches pages whose title
+//         contains the domain)
+//   - reads idle time (GetLastInputInfo vs GetTickCount — the Win32 analogue of
+//     macOS HIDIdleTime)
 
 var (
 	modUser32   = windows.NewLazySystemDLL("user32.dll")
@@ -67,7 +71,14 @@ func (windowsForegroundProbe) Probe() (ForegroundProbeResult, error) {
 	if !ok {
 		return ForegroundProbeResult{IdleSeconds: idle}, nil
 	}
-	url := hostFromBrowserWindowTitle(windowsWindowText(hwnd)) // "" when nothing extractable
+
+	var url string
+	if config.GetConfig().Settings.WindowsForegroundUseUIA {
+		url = windowsAddressBarURL(hwnd) // "" on any failure / non-omnibox UI locale
+	}
+	if url == "" {
+		url = hostFromBrowserWindowTitle(windowsWindowText(hwnd)) // "" when nothing extractable
+	}
 	return ForegroundProbeResult{App: browser, URL: url, IdleSeconds: idle}, nil
 }
 

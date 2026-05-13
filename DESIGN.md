@@ -343,7 +343,7 @@ chosen at package init by build tag:
 | Platform | Implementation | URL fidelity | Idle source |
 |----------|----------------|--------------|-------------|
 | macOS | `macOSForegroundProbe` — `osascript` AppleScript probe | real active-tab URL | IOKit `HIDIdleTime` |
-| Windows | `windowsForegroundProbe` — Win32 `GetForegroundWindow` + window title | best-effort host from window title (Chrome/Edge only) | `GetLastInputInfo` vs `GetTickCount` |
+| Windows | `windowsForegroundProbe` — Win32 `GetForegroundWindow` + window title; optional UI Automation address-bar read when `windows_foreground_use_uia` is on | address bar (UIA) → else host from window title; Chrome/Edge only | `GetLastInputInfo` vs `GetTickCount` |
 | Linux/other | `macOSForegroundProbe` (its `runtime.GOOS != "darwin"` guard makes it a no-op) | — | — |
 
 `recordForegroundTick` is platform-agnostic: it calls `probe.Probe()`, applies
@@ -361,17 +361,38 @@ not the whole script.
 
 **Windows probe.** `GetForegroundWindow` → `GetWindowThreadProcessId` →
 `OpenProcess`/`QueryFullProcessImageName` to check the foreground process is
-`chrome.exe` or `msedge.exe`, then `GetWindowTextW` for the title, then
-`hostFromBrowserWindowTitle` strips the `" - Google Chrome"` / `" - Microsoft
-Edge"` suffix and pulls the first hostname-shaped token out of the title (a
-strict regex: dot-separated DNS labels + alphabetic TLD, so words and IP
-literals don't match). Because a window title is the *page* title, this only
-registers pages whose title contains the domain — most don't, so this
-under-reports heavily, and it can mis-attribute when a title *mentions* a
-different domain than the one open. The accurate fix is a UI Automation
-address-bar probe (issue #94 follow-up); the window-title path is the
-"something rather than nothing" first cut so the opt-in flag isn't a complete
-no-op on Windows.
+`chrome.exe` or `msedge.exe`, then `GetWindowTextW` for the title, then the URL
+is resolved in two tiers:
+
+1. **UI Automation address bar** (`windowsAddressBarURL`,
+   `internal/scheduler/foreground_uia_windows.go`) — only if
+   `settings.windows_foreground_use_uia` is on. Hand-rolled COM over `go-ole`
+   (the UIAutomation interfaces aren't IDispatch-friendly, so the vtables are
+   declared manually): `CoCreateInstance(CUIAutomation)` →
+   `ElementFromHandle(hwnd)` → `FindFirst(Descendants, ControlType==Edit AND
+   Name==<localized "Address and search bar">)` → `GetCurrentPropertyValue(UIA_ValueValuePropertyId)`.
+   `normalizeAddressBarValue` re-attaches `https://` when Chromium's
+   steady-state omnibox elided it. The whole call is wrapped in `recover()` so a
+   bad vtable offset or a flaky browser UIA tree degrades to tier 2 rather than
+   killing the daemon. Returns "" (→ tier 2) on COM failure, a non-English
+   browser UI (only a few omnibox-name locales are recognised), or anything else.
+   Caveat: the omnibox shows the *loaded* URL except mid-edit, when it shows
+   what the user is typing — so a half-typed tracked domain can briefly be
+   attributed before navigation. Off by default until it has Windows mileage
+   (issue #94).
+2. **Window-title heuristic** (`hostFromBrowserWindowTitle`, in the
+   cross-platform `foreground.go` so it's unit-tested everywhere) — strip the
+   `" - Google Chrome"` / `" - Microsoft Edge"` suffix and pull the first
+   hostname-shaped token from the title (strict regex: dot-separated DNS labels
+   + alphabetic TLD, so plain words and IP literals don't match). A window title
+   is the *page* title, which only sometimes contains the domain — so this
+   under-reports heavily and can mis-attribute when a title *mentions* a
+   different domain than the one open. It's the "something rather than nothing"
+   floor so the opt-in flag isn't a complete no-op on Windows even without UIA.
+
+Either way the probe wraps the result through `extractHost`-compatible form
+(`https://<host>` for the title token; the raw value for UIA, after
+`normalizeAddressBarValue`).
 
 **Filtering.** A tick is recorded only when **all** of these hold (in
 `recordForegroundTick`):
@@ -413,7 +434,7 @@ the DNS-bucket signal. Routing foreground time into quota is a bigger product
 decision that's deliberately out of scope for the metrics addition.
 
 **Limitations.**
-- Full fidelity on macOS only. The Windows probe is a window-title heuristic (Chrome/Edge), so it misses most pages and can mis-attribute; the UI Automation upgrade is tracked in issue #94. Linux/other: no-op.
+- Full fidelity on macOS only. On Windows the default is the window-title heuristic (Chrome/Edge), which misses most pages and can mis-attribute; `windows_foreground_use_uia: true` adds the UI Automation address-bar read (English browser UI only so far). Both tracked in issue #94. Linux/other: no-op.
 - Browser-only. Time spent in Slack, Discord, Xcode, etc. is not counted (tracked separately as a follow-up).
 - 60-second granularity. Sessions shorter than a minute may not register.
 - Inherits the `osascript` fragility tax of the per-tick close path — same `su -` user-context elevation under launchd-as-root.
@@ -561,9 +582,10 @@ type Settings struct {
     PrimaryDNS               string `json:"primary_dns"`
     BackupDNS                string `json:"backup_dns"`
     AuthToken                string `json:"auth_token"`
-    EnforcementMode          string `json:"enforcement_mode,omitempty"`           // "hosts" | "dns" | "strict"
-    DNSFailureMode           string `json:"dns_failure_mode,omitempty"`           // "open" (default) | "closed"
-    EnableForegroundTracking bool   `json:"enable_foreground_tracking,omitempty"` // opt-in; full fidelity macOS, window-title heuristic Windows, no-op elsewhere
+    EnforcementMode          string `json:"enforcement_mode,omitempty"`            // "hosts" | "dns" | "strict"
+    DNSFailureMode           string `json:"dns_failure_mode,omitempty"`            // "open" (default) | "closed"
+    EnableForegroundTracking bool   `json:"enable_foreground_tracking,omitempty"`  // opt-in; full fidelity macOS, window-title heuristic Windows, no-op elsewhere
+    WindowsForegroundUseUIA  bool   `json:"windows_foreground_use_uia,omitempty"`  // Windows-only; also read the real URL via UI Automation (default off)
 }
 
 type Rule struct {
@@ -914,7 +936,7 @@ Sentinel is **not** a security tool. It's a friction tool against your own futur
 
 - Service framework: Windows Service Manager via `kardianos/service`.
 - Tab closing and pre-block notifications are not implemented — Windows has no equivalent of the AppleScript path. Could be done with PowerShell + browser automation, but isn't currently. Tracked: tab closing #113, notifications #114.
-- Foreground tab tracking *is* implemented, but as a coarse window-title heuristic (`internal/scheduler/foreground_windows.go`): `GetForegroundWindow` + `GetWindowTextW` + a process-image check for `chrome.exe`/`msedge.exe`, with idle from `GetLastInputInfo`. It only catches pages whose window title contains the domain. The accurate UI Automation address-bar probe is the next step on issue #94.
+- Foreground tab tracking is implemented (`internal/scheduler/foreground_windows.go`): `GetForegroundWindow` + `GetWindowTextW` + a process-image check for `chrome.exe`/`msedge.exe`, with idle from `GetLastInputInfo`. By default it derives the host from the window title (coarse — only catches titled-with-domain pages). With `windows_foreground_use_uia: true` it also reads the real address bar via UI Automation (`foreground_uia_windows.go`, hand-rolled COM over `go-ole`), falling back to the title heuristic on any failure or a non-English browser UI. The UIA path is off by default until it's been exercised on real Windows — see #94.
 - `pf` is macOS-only (BSD packet filter); Windows support for strict mode would require WFP integration and isn't planned (tracked: #117).
 - `dns` mode works, but the installer doesn't auto-point adapters at `127.0.0.1` — that's manual until #112 lands. DNS *reset* (on uninstall) is done by PowerShell: `Set-DnsClientServerAddress -InterfaceAlias 'Wi-Fi' -ResetServerAddresses`.
 - `ipconfig /flushdns` for cache flush.

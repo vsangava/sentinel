@@ -3,6 +3,7 @@ module github.com/vsangava/sentinel
 go 1.26.2
 
 require (
+	github.com/go-ole/go-ole v1.3.0
 	github.com/kardianos/service v1.2.4
 	github.com/miekg/dns v1.1.72
 	golang.org/x/sys v0.39.0
