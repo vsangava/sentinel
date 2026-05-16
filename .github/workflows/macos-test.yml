@@ -485,12 +485,26 @@ jobs:
           fi
           echo "[OK] /etc/pf.conf injection removed"
 
-          # Anchor unloaded from running pf state
-          if sudo pfctl -s Anchors 2>/dev/null | grep -q sentinel; then
-            echo "FAIL: sentinel anchor still loaded in pf"
+          # Block rules flushed from the kernel anchor.
+          #
+          # Note: macOS pfctl keeps the anchor *name* listed in `pfctl -s Anchors`
+          # after its rules are flushed and the pf.conf reference is removed —
+          # the namespace persists even when there are no rules attached. The
+          # user-meaningful check is therefore "are any block rules still in the
+          # anchor", not "is the name still listed".
+          remaining=$(sudo pfctl -a sentinel -s rules 2>/dev/null | grep -c '^block' || true)
+          if [ "${remaining:-0}" -ne 0 ]; then
+            echo "FAIL: sentinel anchor still has $remaining block rule(s) after clean"
+            sudo pfctl -a sentinel -s rules
             exit 1
           fi
-          echo "[OK] sentinel anchor unloaded from pf"
+          echo "[OK] sentinel anchor flushed (0 block rules)"
+
+          if sudo pfctl -s Anchors 2>/dev/null | grep -q sentinel; then
+            echo "(note: anchor name still listed in 'pfctl -s Anchors' — pfctl quirk; ok because the anchor is empty)"
+          else
+            echo "(also: anchor name unlisted in 'pfctl -s Anchors')"
+          fi
 
       # ============================================================ logs
       - name: Capture macOS log entries
