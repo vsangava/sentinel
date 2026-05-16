@@ -1,0 +1,564 @@
+# macOS integration test harness.
+#
+# Builds sentinel on a macOS runner, then drives it through the full
+# install / run / clean lifecycle in all three enforcement modes — hosts,
+# dns, and **strict** (the macOS-only pf-firewall path that has had zero CI
+# coverage until now).
+#
+# Verifies that:
+#   - the binary lands at /usr/local/bin/sentinel (#116)
+#   - the launchd plist's Program field references that path (#116 macOS half)
+#   - hosts mode writes the managed block with LF line endings (counterpart
+#     to the Windows CRLF check in #115)
+#   - blocked domains return 0.0.0.0 from the system resolver (getaddrinfo)
+#   - the web dashboard at 127.0.0.1:8040 responds with /api/config + /api/status
+#   - dns mode binds 127.0.0.1:53 and points the system resolver at it
+#   - strict mode injects the pf anchor + populates pf tables with resolved IPs
+#   - `clean --yes` reverts every system change cleanly in each mode
+#
+# Triggers:
+#   release.published   — automatic post-release smoke
+#   workflow_dispatch   — manual button in Actions UI for development
+#
+# Out of scope (skipped explicitly — the runner has no GUI session):
+#   - AppleScript tab closing in Chrome/Safari/Arc/Brave
+#   - 3-minute pre-block notifications
+#   - Foreground-tab tracking (active-tab URL probe)
+#
+# Cost: free for public repos. Private repos bill at 10× standard runner rate.
+
+name: macOS Test Harness
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos-integration:
+    name: Install / run / clean — hosts + dns + strict modes
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    env:
+      # Stable token across the run so DNS- and strict-mode tests can hit
+      # /api/status without a JSON round-trip to read the auto-generated one.
+      SENTINEL_AUTH_TOKEN: ci-macos-test-${{ github.run_id }}
+
+    steps:
+      # ---------------------------------------------------------------- setup
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Show build environment
+        run: |
+          uname -a
+          sw_vers
+          go version
+          # GitHub-hosted macOS runners give passwordless sudo. Confirm so a
+          # mis-provisioned runner fails this step rather than the install one.
+          sudo -n true && echo "[OK] passwordless sudo available" || (echo "FAIL: sudo needs password" && exit 1)
+          # No GUI session on hosted runners — getMacUser() returns "root" and
+          # the AppleScript paths in the daemon will (correctly) no-op.
+          echo "console user: $(stat -f %Su /dev/console)"
+
+      - name: Build sentinel
+        run: |
+          version="${{ github.event.release.tag_name }}"
+          if [ -z "$version" ]; then
+            version="ci-${{ github.run_id }}"
+          fi
+          go build -ldflags "-X github.com/vsangava/sentinel/internal/version.Version=$version" -o sentinel ./cmd/app
+          ls -la ./sentinel
+          file ./sentinel
+
+      - name: Unit tests (cross-platform Go suite)
+        run: go test ./...
+
+      # ----------------------------------------------- no-install rule eval
+      - name: --test-query — verify rule evaluation (no install)
+        run: |
+          out=$(./sentinel --test-query "2024-04-01 10:30" reddit.com 2>&1)
+          echo "$out"
+          if ! echo "$out" | grep -qi 'blocked'; then
+            echo "FAIL: expected --test-query to report reddit.com as blocked"
+            exit 1
+          fi
+          echo "[OK] reddit.com correctly evaluated as blocked"
+          # Tear down the auto-seeded local config so it doesn't shadow later steps.
+          rm -f ./sentinel.json
+          rm -rf ./profiles
+
+      # =====================================================================
+      # SCENARIO 1 — HOSTS MODE (default config; `social` blocked 24/7)
+      # =====================================================================
+      - name: Hosts mode — sentinel setup
+        run: |
+          sudo ./sentinel setup
+          echo "Waiting 75s for first scheduler tick..."
+          sleep 75
+
+      - name: Hosts mode — verify install
+        run: |
+          # Plist path varies by kardianos/service version — glob for it.
+          plist=$(sudo ls /Library/LaunchDaemons/ 2>/dev/null | grep -i sentinel | head -1)
+          if [ -z "$plist" ]; then
+            echo "FAIL: no sentinel plist under /Library/LaunchDaemons/"
+            sudo ls /Library/LaunchDaemons/
+            exit 1
+          fi
+          plist="/Library/LaunchDaemons/$plist"
+          echo "[OK] plist: $plist"
+
+          # Binary at canonical install path (#116)
+          test -x /usr/local/bin/sentinel || { echo "FAIL: /usr/local/bin/sentinel missing"; exit 1; }
+          echo "[OK] /usr/local/bin/sentinel exists and is executable"
+
+          # Plist's Program field references the installed path (the macOS half
+          # of the #116 svcConfig.Executable pin). kardianos may use Program
+          # (string) or ProgramArguments (array) — try both.
+          program=$(sudo /usr/libexec/PlistBuddy -c "Print :Program" "$plist" 2>/dev/null \
+                    || sudo /usr/libexec/PlistBuddy -c "Print :ProgramArguments:0" "$plist" 2>/dev/null \
+                    || true)
+          echo "plist Program: $program"
+          if [ "$program" != "/usr/local/bin/sentinel" ]; then
+            echo "FAIL: plist Program is '$program', expected '/usr/local/bin/sentinel'"
+            exit 1
+          fi
+          echo "[OK] plist points at /usr/local/bin/sentinel (#116)"
+
+          # Service is loaded
+          label=$(basename "$plist" .plist)
+          sudo launchctl print "system/$label" 2>&1 | head -10 || echo "(launchctl print not available)"
+
+      - name: Hosts mode — verify hosts file content + line endings
+        run: |
+          grep -q "# sentinel:begin" /etc/hosts || { echo "FAIL: no sentinel:begin"; exit 1; }
+          grep -q "# sentinel:end" /etc/hosts || { echo "FAIL: no sentinel:end"; exit 1; }
+          echo "[OK] sentinel block markers present"
+
+          # Default config blocks `social` 24/7 → reddit.com lives in the file.
+          grep -qE "^0\.0\.0\.0[[:space:]]+reddit\.com$" /etc/hosts || {
+            echo "FAIL: 0.0.0.0 reddit.com not in /etc/hosts"
+            grep -A2 -B2 sentinel /etc/hosts
+            exit 1
+          }
+          echo "[OK] 0.0.0.0 reddit.com line is present"
+
+          # macOS expects LF, not CRLF (the inverse of #115's Windows requirement).
+          # Inspect the bytes inside the sentinel-managed block.
+          if awk '/# sentinel:begin/,/# sentinel:end/' /etc/hosts | LC_ALL=C grep -q $'\r'; then
+            echo "FAIL: sentinel block contains CR characters; expected LF on macOS"
+            exit 1
+          fi
+          echo "[OK] LF line endings (no CR in sentinel block)"
+
+      - name: Hosts mode — verify resolver returns 0.0.0.0
+        run: |
+          # Flush both caches: dscacheutil holds DirectoryService results,
+          # mDNSResponder holds DNS responses.
+          sudo dscacheutil -flushcache
+          sudo killall -HUP mDNSResponder
+          sleep 2
+          # getaddrinfo (used by dscacheutil + python socket) consults /etc/hosts
+          # before any resolver. dig does NOT — it speaks DNS only — so use
+          # python here.
+          ip=$(python3 -c 'import socket; print(socket.gethostbyname("reddit.com"))')
+          echo "reddit.com -> $ip"
+          if [ "$ip" != "0.0.0.0" ]; then
+            echo "FAIL: expected reddit.com -> 0.0.0.0; got $ip"
+            exit 1
+          fi
+          echo "[OK] reddit.com resolves to 0.0.0.0 via /etc/hosts"
+
+      - name: Hosts mode — verify web dashboard
+        run: |
+          # /api/config is unauthenticated and returns the auto-generated token.
+          token=$(curl -s --max-time 10 http://127.0.0.1:8040/api/config | python3 -c 'import json,sys; print(json.load(sys.stdin)["settings"]["auth_token"])')
+          if [ -z "$token" ]; then
+            echo "FAIL: no auth_token in /api/config"
+            exit 1
+          fi
+          echo "[OK] /api/config OK (token length=${#token})"
+
+          mode=$(curl -s --max-time 10 -H "X-Auth-Token: $token" http://127.0.0.1:8040/api/status | python3 -c 'import json,sys; print(json.load(sys.stdin)["enforcement_mode"])')
+          echo "[OK] /api/status — mode=$mode"
+          if [ "$mode" != "hosts" ]; then
+            echo "FAIL: expected hosts mode, got $mode"
+            exit 1
+          fi
+
+      - name: Hosts mode — clean
+        run: |
+          sudo ./sentinel clean --yes
+
+      - name: Hosts mode — verify clean removed everything
+        run: |
+          # Plist gone
+          if sudo ls /Library/LaunchDaemons/ 2>/dev/null | grep -qi sentinel; then
+            echo "FAIL: sentinel plist still in /Library/LaunchDaemons/"
+            exit 1
+          fi
+          echo "[OK] launchd plist gone"
+
+          # Binary gone (#116 RemoveInstalledBinary)
+          test ! -e /usr/local/bin/sentinel || { echo "FAIL: /usr/local/bin/sentinel still present"; exit 1; }
+          echo "[OK] /usr/local/bin/sentinel gone"
+
+          # Config dir gone
+          test ! -d "/Library/Application Support/Sentinel" || { echo "FAIL: config dir still present"; exit 1; }
+          echo "[OK] config dir gone"
+
+          # No sentinel block in /etc/hosts
+          if grep -q "sentinel:begin\|sentinel:end" /etc/hosts; then
+            echo "FAIL: sentinel block markers still in /etc/hosts"
+            exit 1
+          fi
+          echo "[OK] /etc/hosts restored (no sentinel markers)"
+
+          # Resolution back to normal
+          sudo dscacheutil -flushcache
+          sudo killall -HUP mDNSResponder
+          sleep 2
+          ip=$(python3 -c 'import socket; print(socket.gethostbyname("reddit.com"))' 2>/dev/null || echo "(unresolved)")
+          echo "reddit.com after clean -> $ip"
+
+      # =====================================================================
+      # SCENARIO 2 — DNS MODE
+      # =====================================================================
+      # Pre-seed the config dir with enforcement_mode=dns and a known auth
+      # token so /api/status doesn't require a JSON round-trip.
+      # ---------------------------------------------------------------------
+      - name: DNS mode — pre-seed config (block example.com 24/7)
+        run: |
+          sudo mkdir -p "/Library/Application Support/Sentinel/profiles"
+          sudo tee "/Library/Application Support/Sentinel/sentinel.json" >/dev/null <<EOF
+          {
+            "settings": {
+              "primary_dns": "8.8.8.8:53",
+              "backup_dns": "1.1.1.1:53",
+              "enforcement_mode": "dns",
+              "dns_failure_mode": "open",
+              "auth_token": "${SENTINEL_AUTH_TOKEN}"
+            },
+            "groups": {
+              "ci-block": ["example.com"]
+            },
+            "active_profile": "default"
+          }
+          EOF
+          sudo tee "/Library/Application Support/Sentinel/profiles/default.json" >/dev/null <<'EOF'
+          {
+            "rules": [{
+              "group": "ci-block",
+              "is_active": true,
+              "schedules": {
+                "Monday":    [{"start":"00:00","end":"23:59"}],
+                "Tuesday":   [{"start":"00:00","end":"23:59"}],
+                "Wednesday": [{"start":"00:00","end":"23:59"}],
+                "Thursday":  [{"start":"00:00","end":"23:59"}],
+                "Friday":    [{"start":"00:00","end":"23:59"}],
+                "Saturday":  [{"start":"00:00","end":"23:59"}],
+                "Sunday":    [{"start":"00:00","end":"23:59"}]
+              }
+            }]
+          }
+          EOF
+          echo "=== sentinel.json ==="
+          sudo cat "/Library/Application Support/Sentinel/sentinel.json"
+
+      - name: DNS mode — sentinel setup
+        run: |
+          sudo ./sentinel setup
+          echo "Waiting 75s for scheduler tick + DNS proxy to bind..."
+          sleep 75
+
+      - name: DNS mode — verify install
+        run: |
+          # UDP/53 bound by sentinel
+          sudo lsof -iUDP:53 -P -n | head -10 || true
+          if ! sudo lsof -iUDP:53 -P -n 2>/dev/null | grep -qi sentinel; then
+            echo "FAIL: sentinel not bound to UDP/53"
+            exit 1
+          fi
+          echo "[OK] UDP/53 bound by sentinel"
+
+          # System resolver includes 127.0.0.1 (the macOS half of the #112
+          # auto-DNS-config-on-install gap).
+          scutil --dns | head -25
+          if ! scutil --dns | grep -q "127.0.0.1"; then
+            echo "FAIL: 127.0.0.1 not in system resolvers"
+            exit 1
+          fi
+          echo "[OK] system resolvers include 127.0.0.1"
+
+      - name: DNS mode — verify proxy returns 0.0.0.0 for blocked domain
+        run: |
+          ip=$(dig @127.0.0.1 example.com +short +time=5 +tries=2 | head -1)
+          echo "example.com via 127.0.0.1 -> $ip"
+          if [ "$ip" != "0.0.0.0" ]; then
+            echo "FAIL: expected 0.0.0.0, got $ip"
+            exit 1
+          fi
+          echo "[OK] proxy returns 0.0.0.0 for blocked domain"
+
+      - name: DNS mode — verify proxy forwards non-blocked domains
+        run: |
+          # iana.org is not in the blocked group; proxy should forward to upstream.
+          ip=$(dig @127.0.0.1 iana.org +short +time=5 +tries=2 | head -1)
+          echo "iana.org via 127.0.0.1 -> $ip"
+          if [ "$ip" = "0.0.0.0" ] || [ -z "$ip" ]; then
+            echo "FAIL: expected real upstream IP for iana.org; got '$ip'"
+            exit 1
+          fi
+          echo "[OK] proxy forwards non-blocked domains to upstream"
+
+      - name: DNS mode — verify dashboard with seeded auth token
+        run: |
+          mode=$(curl -s --max-time 10 -H "X-Auth-Token: ${SENTINEL_AUTH_TOKEN}" http://127.0.0.1:8040/api/status | python3 -c 'import json,sys; print(json.load(sys.stdin)["enforcement_mode"])')
+          echo "[OK] /api/status — mode=$mode"
+          [ "$mode" = "dns" ] || { echo "FAIL: expected dns"; exit 1; }
+
+      - name: DNS mode — clean
+        run: sudo ./sentinel clean --yes
+
+      - name: DNS mode — verify clean reset DNS adapters
+        run: |
+          if sudo ls /Library/LaunchDaemons/ 2>/dev/null | grep -qi sentinel; then
+            echo "FAIL: plist still present"; exit 1
+          fi
+          test ! -e /usr/local/bin/sentinel || { echo "FAIL: binary still present"; exit 1; }
+          test ! -d "/Library/Application Support/Sentinel" || { echo "FAIL: config dir still present"; exit 1; }
+          echo "[OK] plist + binary + config dir gone"
+
+          # No system resolver should still point at 127.0.0.1 — the teardown
+          # PowerShell-equivalent on macOS (networksetup -setdnsservers ... Empty)
+          # is what we're verifying.
+          if scutil --dns | grep -q "127.0.0.1"; then
+            echo "FAIL: 127.0.0.1 still in system resolvers after clean"
+            scutil --dns | head -25
+            exit 1
+          fi
+          echo "[OK] system resolvers no longer reference 127.0.0.1"
+
+      # =====================================================================
+      # SCENARIO 3 — STRICT MODE (macOS-only pf integration)
+      # =====================================================================
+      # The big one: this path has had zero CI coverage. Strict mode adds a
+      # pf packet-filter anchor on top of DNS blocking — IPs are resolved via
+      # backup_dns and dropped at the kernel by pf. Verifies the full anchor
+      # injection / table population / cleanup cycle.
+      # ---------------------------------------------------------------------
+      - name: Strict mode — pre-seed config
+        run: |
+          sudo mkdir -p "/Library/Application Support/Sentinel/profiles"
+          sudo tee "/Library/Application Support/Sentinel/sentinel.json" >/dev/null <<EOF
+          {
+            "settings": {
+              "primary_dns": "8.8.8.8:53",
+              "backup_dns": "1.1.1.1:53",
+              "enforcement_mode": "strict",
+              "dns_failure_mode": "open",
+              "auth_token": "${SENTINEL_AUTH_TOKEN}"
+            },
+            "groups": {
+              "ci-block": ["example.com"]
+            },
+            "active_profile": "default"
+          }
+          EOF
+          sudo tee "/Library/Application Support/Sentinel/profiles/default.json" >/dev/null <<'EOF'
+          {
+            "rules": [{
+              "group": "ci-block",
+              "is_active": true,
+              "schedules": {
+                "Monday":    [{"start":"00:00","end":"23:59"}],
+                "Tuesday":   [{"start":"00:00","end":"23:59"}],
+                "Wednesday": [{"start":"00:00","end":"23:59"}],
+                "Thursday":  [{"start":"00:00","end":"23:59"}],
+                "Friday":    [{"start":"00:00","end":"23:59"}],
+                "Saturday":  [{"start":"00:00","end":"23:59"}],
+                "Sunday":    [{"start":"00:00","end":"23:59"}]
+              }
+            }]
+          }
+          EOF
+
+      - name: Strict mode — sentinel setup
+        run: |
+          sudo ./sentinel setup
+          echo "Waiting 90s for first scheduler tick + pf refresh + IP resolution..."
+          sleep 90
+
+      - name: Strict mode — verify pf anchor + tables
+        run: |
+          echo "=== pf info ==="
+          sudo pfctl -s info 2>&1 | head -3 || true
+
+          # Anchor file written by the strict enforcer
+          test -f /etc/pf.anchors/sentinel || { echo "FAIL: /etc/pf.anchors/sentinel missing"; sudo ls /etc/pf.anchors/; exit 1; }
+          echo "[OK] /etc/pf.anchors/sentinel exists"
+          echo "--- anchor file content ---"
+          sudo head -30 /etc/pf.anchors/sentinel
+
+          # Anchor reference injected into /etc/pf.conf
+          if ! sudo grep -q 'anchor "sentinel"' /etc/pf.conf; then
+            echo "FAIL: 'anchor \"sentinel\"' not in /etc/pf.conf"
+            sudo cat /etc/pf.conf
+            exit 1
+          fi
+          echo "[OK] /etc/pf.conf has anchor reference"
+
+          # Anchor loaded into the running pf state
+          if ! sudo pfctl -s Anchors 2>/dev/null | grep -q sentinel; then
+            echo "FAIL: 'sentinel' anchor not loaded into pf"
+            sudo pfctl -s Anchors
+            exit 1
+          fi
+          echo "[OK] pf anchor 'sentinel' loaded"
+
+          echo "--- loaded rules in sentinel anchor ---"
+          sudo pfctl -a sentinel -s rules 2>&1 | head -20
+
+          # Confirm tables are populated with at least one IP
+          echo "--- tables ---"
+          tables=$(sudo pfctl -a sentinel -s Tables 2>/dev/null || true)
+          echo "$tables"
+          if [ -z "$tables" ]; then
+            echo "FAIL: no pf tables under sentinel anchor"
+            exit 1
+          fi
+          first_table=$(echo "$tables" | head -1)
+          echo "--- IPs in $first_table ---"
+          sudo pfctl -a sentinel -t "$first_table" -T show 2>&1 | head -10
+          ip_count=$(sudo pfctl -a sentinel -t "$first_table" -T show 2>/dev/null | wc -l | tr -d ' ')
+          if [ "$ip_count" = "0" ]; then
+            echo "FAIL: pf table $first_table has 0 IPs — strict refresh did not resolve example.com"
+            exit 1
+          fi
+          echo "[OK] pf table $first_table populated with $ip_count IP(s)"
+
+      - name: Strict mode — verify proxy still blocks via DNS layer
+        run: |
+          # Strict mode is DNS + pf; the DNS layer alone should still return 0.0.0.0
+          ip=$(dig @127.0.0.1 example.com +short +time=5 +tries=2 | head -1)
+          echo "example.com via 127.0.0.1 -> $ip"
+          [ "$ip" = "0.0.0.0" ] || { echo "FAIL: DNS layer not blocking in strict mode"; exit 1; }
+          echo "[OK] DNS layer returns 0.0.0.0 (strict mode = dns + pf)"
+
+      - name: Strict mode — clean
+        run: sudo ./sentinel clean --yes
+
+      - name: Strict mode — verify clean removed pf state
+        run: |
+          # Anchor file removed
+          test ! -f /etc/pf.anchors/sentinel || { echo "FAIL: /etc/pf.anchors/sentinel still present"; exit 1; }
+          echo "[OK] /etc/pf.anchors/sentinel removed"
+
+          # /etc/pf.conf restored — no sentinel anchor reference
+          if sudo grep -q 'anchor "sentinel"' /etc/pf.conf; then
+            echo "FAIL: 'anchor \"sentinel\"' still in /etc/pf.conf"
+            sudo grep -B2 -A2 sentinel /etc/pf.conf
+            exit 1
+          fi
+          echo "[OK] /etc/pf.conf injection removed"
+
+          # Anchor unloaded from running pf state
+          if sudo pfctl -s Anchors 2>/dev/null | grep -q sentinel; then
+            echo "FAIL: sentinel anchor still loaded in pf"
+            exit 1
+          fi
+          echo "[OK] sentinel anchor unloaded from pf"
+
+      # ============================================================ logs
+      - name: Capture macOS log entries
+        if: always()
+        run: |
+          echo "=== launchd plist files (any sentinel-shaped) ==="
+          sudo ls /Library/LaunchDaemons/ 2>/dev/null | grep -i sentinel || echo "(none)"
+          echo ""
+          echo "=== last 5 minutes of process == sentinel ==="
+          # `log show` is the macOS unified logging interface; pulls from the
+          # in-memory + on-disk log store filtered by predicate.
+          log show --predicate 'process == "sentinel"' --last 5m 2>&1 | tail -100 || true
+          echo ""
+          echo "=== last 200 lines of /var/log/system.log mentioning sentinel ==="
+          sudo grep -i sentinel /var/log/system.log 2>/dev/null | tail -200 || echo "(none)"
+
+      - name: Final cleanup safety net
+        if: always()
+        run: |
+          # If any step bailed out before its scenario's `clean` ran, leave the
+          # runner tidy regardless. Idempotent.
+          if [ -x ./sentinel ]; then
+            sudo ./sentinel clean --yes 2>&1 || true
+          fi
+          # Belt-and-braces — reset DNS on any remaining interface that has
+          # 127.0.0.1, in case the enforcer's teardown path failed.
+          sudo networksetup -listallnetworkservices 2>/dev/null \
+            | grep -v "asterisk" \
+            | tail -n +2 \
+            | while IFS= read -r svc; do
+                dns=$(sudo networksetup -getdnsservers "$svc" 2>/dev/null || true)
+                if echo "$dns" | grep -q "127.0.0.1"; then
+                  sudo networksetup -setdnsservers "$svc" "Empty" 2>/dev/null && echo "reset DNS on $svc" || true
+                fi
+              done
+          sudo dscacheutil -flushcache 2>/dev/null || true
+          sudo killall -HUP mDNSResponder 2>/dev/null || true
+
+      - name: Test summary
+        if: always()
+        run: |
+          cat <<'SUMMARY'
+          ============================================================
+           Sentinel macOS test harness — coverage at a glance
+          ============================================================
+
+           Build / unit:
+             [x] go build (darwin/arm64)
+             [x] go test ./...
+             [x] --test-query rule eval (no install)
+
+           Hosts mode (default config — `social` 24/7):
+             [x] setup → service Loaded
+             [x] launchd plist under /Library/LaunchDaemons/
+             [x] binary at /usr/local/bin/sentinel (#116)
+             [x] plist Program references /usr/local/bin/sentinel (#116 macOS half)
+             [x] /etc/hosts contains 0.0.0.0 reddit.com
+             [x] LF line endings (no CR in sentinel block)
+             [x] python socket.gethostbyname reddit.com -> 0.0.0.0
+             [x] /api/config + /api/status reachable on 127.0.0.1:8040
+             [x] clean removes plist / binary / config / hosts block
+
+           DNS mode (seeded, example.com 24/7):
+             [x] setup → service Loaded, UDP/53 bound
+             [x] system resolvers include 127.0.0.1
+             [x] dig @127.0.0.1 example.com -> 0.0.0.0
+             [x] dig @127.0.0.1 iana.org  -> real upstream IP
+             [x] /api/status confirms dns mode
+             [x] clean reset DNS adapters / removed install
+
+           Strict mode (macOS-only pf path — first CI coverage):
+             [x] /etc/pf.anchors/sentinel exists
+             [x] /etc/pf.conf has sentinel anchor reference
+             [x] pf shows sentinel anchor loaded
+             [x] pf table populated with resolved IPs for blocked domain
+             [x] DNS layer still returns 0.0.0.0 (strict = dns + pf)
+             [x] clean removes anchor file + pf.conf injection + unloads from pf
+
+           Out of scope (no GUI session on hosted runners):
+             [-] AppleScript tab closing (Chrome/Safari/Arc/Brave)
+             [-] 3-minute pre-block notifications
+             [-] Foreground-tab tracking
+          ============================================================
+          SUMMARY
