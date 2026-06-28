@@ -14,20 +14,12 @@ case "$ARCH" in
   *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
 esac
 
-echo "Fetching latest release info..."
-URL=$(curl -fsSL https://api.github.com/repos/vsangava/sentinel/releases/latest \
-  | grep browser_download_url \
-  | grep "\"$BINARY\"" \
-  | cut -d'"' -f4)
-
-if [[ -z "$URL" ]]; then
-  echo "Could not find a release asset for $BINARY. Check https://github.com/vsangava/sentinel/releases/latest"
-  exit 1
-fi
-
 echo "Downloading $BINARY..."
 TMP=$(mktemp)
-curl -fsSL -o "$TMP" "$URL"
+# GitHub's /releases/latest/download/<asset> redirects to the latest release's
+# asset URL — no API call, no JSON parsing, no rate-limit concerns. Use -fSL
+# (not -fsSL) so transfer errors and progress are visible if anything fails.
+curl -fSL -o "$TMP" "https://github.com/vsangava/sentinel/releases/latest/download/$BINARY"
 
 # Remove Gatekeeper quarantine flag (no-op if not set).
 xattr -d com.apple.quarantine "$TMP" 2>/dev/null || true
