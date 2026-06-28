@@ -1001,3 +1001,27 @@ Three independent gaps from the May 12 audit (the umbrella issue #118), bundled 
 - **`cmd/app` is in `.gitignore` but `cmd/app/main.go` is tracked.** `git add cmd/app/main.go` printed an "ignored" warning but the staging actually succeeded for the already-tracked file. Confirmed via `git status` showing the modification staged before committing — easy to misread the warning as a hard failure.
 
 **Wrap-up:** PR [#123](https://github.com/vsangava/sentinel/pull/123) opened against `main` with three commits closing #112, #115, and #116. Windows `dns` mode now self-configures on install, the hosts writer emits CRLF on Windows with audit caveats documented in TROUBLESHOOTING.md, and `setup` installs to `%ProgramFiles%\Sentinel\sentinel.exe` with `svcConfig.Executable` pinned on both OSes (incidentally fixing a latent macOS plist-path bug). `clean` removes the Windows binary and the now-empty install directory. Open follow-ups noted in #115's audit (file-lock retry, preserve existing line-ending convention) and the manual Windows VM verification in the PR's test plan.
+
+## June 28 — install.sh silent no-op fix + v0.3.1
+**PR:** [#129](https://github.com/vsangava/sentinel/pull/129) (merged) · **Release:** [v0.3.1](https://github.com/vsangava/sentinel/releases/tag/v0.3.1)
+
+**Opening prompt:**
+> "I just ran the install command `curl -fsSL https://github.com/vsangava/sentinel/releases/latest/download/install.sh | sudo bash` to install it. there is no output on the terminal, but I don't see that it got installed. /usr/local/bin/ doesn't have sentinel. what's happening?"
+
+**What happened:**
+
+User piped the published `install.sh` into `sudo bash` and got nothing — no binary at `/usr/local/bin/sentinel`, no launchd service. Started by downloading what `/releases/latest/download/install.sh` actually serves (302s to v0.3.0's asset) and reading it. Script looked clean: arch detect, GitHub API for asset URL, curl the binary to a tempfile, `chmod +x`, then `sudo "$TMP" --setup`.
+
+That last line was the bug. The dispatch chain in `cmd/app/main.go` matches the bare `setup` subcommand at line 365, then `clean`, `--test-web`, `--test-query`, `--test-applescript`, `--local`, `--set-mode`, `--set-profile`, `--list-profiles`. There is no `--setup` handler. The flag form falls through to the generic `service.Control(s, os.Args[1])` at line 511, which only knows the kardianos actions (`install`/`uninstall`/`start`/`stop`/`restart`). `service.Control(s, "--setup")` errors and `log.Fatalf` writes to stderr — the script's three "Fetching/Downloading/Installing" echoes go to stdout, the binary's failure goes to stderr, the tempfile deletes itself, and the user sees what looks like a quiet successful run with no resulting install. Has been broken since PR #36 ("simplify install/uninstall to fewer commands"); the publicly-served `releases/latest/download/install.sh` has been a silent no-op for the whole v0.1.x–v0.3.0 line.
+
+`grep -rn -- "--setup"` confirmed `install.sh` was the only outlier: README, Makefile, and `.github/workflows/macos-test.yml` all use the bare `sudo sentinel setup`.
+
+**Fix and ship.** One-line change: `sudo "$TMP" --setup` → `sudo "$TMP" setup`. Branch `fix/install-sh-setup-subcommand`, PR #129, CI green in 38s, squash-merged. Tagged `v0.3.1` as an annotated tag (matching v0.3.0's style) and pushed; release workflow created the release, built all three binaries (macOS arm64 on macos-latest, macOS amd64 cross-compiled from ubuntu, Windows on windows-latest), and uploaded the corrected `install.sh` — all five jobs green. Verified end-to-end: `releases/latest/download/install.sh` now 302s to v0.3.1 and serves the corrected script.
+
+**Gotchas worth flagging:**
+
+- **The bug only surfaces if you read stderr.** With `curl … | sudo bash` the visible echoes in the script (`Fetching latest release info...`, `Downloading...`, `Installing...`) go to stdout and the binary's `log.Fatalf("Failed to --setup: ...")` goes to stderr. Some terminal setups or pipelines route stderr separately, making it easy to mistake a fatal install error for a "the script just ended" success.
+- **The fix has to be re-released, not just merged.** `releases/latest/download/install.sh` serves the asset attached to the latest *release*, not the `install.sh` on `main`. Until the v0.3.1 tag was pushed and the release workflow uploaded the corrected file as an asset, every public install was still hitting the broken v0.3.0 copy. Merging the PR alone wouldn't have helped a single user.
+- **No regression test guards this.** The `cmd/app` dispatch tests don't cover what `install.sh` invokes, and there's no test that the published installer matches a known-good invocation. A cheap guard would be a CI step that greps `install.sh` for `sudo "$TMP" setup` (literal) or runs the script against a built binary in dry-run mode. Not done in this PR — scoped to the bug fix only.
+
+**Wrap-up:** PR [#129](https://github.com/vsangava/sentinel/pull/129) merged; [v0.3.1](https://github.com/vsangava/sentinel/releases/tag/v0.3.1) cut and verified live. The documented one-liner `curl -fsSL …/install.sh | sudo bash` works again for the first time since PR #36.
