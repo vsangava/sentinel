@@ -35,6 +35,6 @@ xattr -d com.apple.quarantine "$TMP" 2>/dev/null || true
 chmod +x "$TMP"
 
 echo "Installing..."
-sudo "$TMP" --setup
+sudo "$TMP" setup
 
 rm -f "$TMP"
