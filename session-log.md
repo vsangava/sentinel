@@ -1103,3 +1103,17 @@ Verified the live v0.3.2 install.sh end-to-end with `bash -x` (reaches `sudo "$T
 - PR #135 passed CI and was squash-merged. `make release VERSION=v0.3.4` passed in an isolated worktree, including all Go tests and macOS ARM64, macOS Intel, and Windows builds. The `v0.3.4` tag was pushed to trigger the automated release workflow.
 
 **Wrap-up:** Roblox/Discord process termination and process-aware warnings shipped in v0.3.4. The automated workflow is publishing the release assets.
+
+## Oct 11 — Pause/Resume CLI + v0.3.5
+**Session ID:** `0406d79a` · **PR:** [#137](https://github.com/vsangava/sentinel/pull/137) (merged) · **Release:** [v0.3.5](https://github.com/vsangava/sentinel/releases/tag/v0.3.5)
+
+**Opening prompt:**
+> "can you build a pause command to make it easier?"
+
+**What happened:**
+- Added `sentinel pause [minutes]`, defaulting to 30 minutes, and `sentinel resume`. Explicit durations are limited to 1-240 minutes; pausing is rejected during a Pomodoro work phase, and changes apply on the scheduler's next tick.
+- Added tests for default and explicit durations, persistence, invalid input, Pomodoro lock behavior, and resume. Documented CLI commands in README.
+- Removed the Manage PIN instructional hint from the dashboard and README without changing PIN validation behavior.
+- PR #137 passed CI and was squash-merged. `make release VERSION=v0.3.5` passed in an isolated worktree, including all Go tests and macOS ARM64, macOS Intel, and Windows builds. The `v0.3.5` tag was pushed to trigger the automated release workflow.
+
+**Wrap-up:** Pause/resume CLI commands and the PIN-copy cleanup shipped in v0.3.5. The release is published with the installer and all three platform binaries.
