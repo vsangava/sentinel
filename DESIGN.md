@@ -296,7 +296,11 @@ func evaluateRules() {
     //    endpoints aren't sites users visit with browsers.
     runPerTickCloseTabs(newBlocked, cfg, browserTabProbe)
 
-    // 5. Fire warnings, debounced per-domain to once per minute.
+    // 5. Terminate logged-in-user Roblox/Discord processes when their app
+    //    domains are blocked. This does not depend on finding a browser tab.
+    runPerTickTerminateApps(newBlocked, terminateBlockedProcesses)
+
+    // 6. Fire warnings, debounced per-domain to once per minute.
     if len(warningDomains) > 0 {
         // for each domain, check lastWarningTime[domain]; if >=1min ago, run.
         runMacOSWarning(domainsToWarn)
@@ -309,6 +313,8 @@ The `activeEnforcer` is wired by `main.go` via `scheduler.SetEnforcer(e)` before
 `closeMacOSTabs` and `runMacOSWarning` are no-ops on non-darwin. On darwin they call into the AppleScript abstraction (next section).
 
 `runPerTickCloseTabs` first applies the `_doh` filter to the blocked set, then probes browsers via `browserTabProbe` (a swappable `func([]string) []string`). Only when the probe returns at least one open match does it fire `closeMacOSTabs`, so the steady-state cost when no browsers are open is one cheap osascript probe per tick. The reason for running every tick rather than only on transitions: in strict mode, IP-layer enforcement has fundamental gaps (Safari iCloud Private Relay, browser DoH, geo-anycast IP mismatches), so a tab opened *during* an active block window — when there's no transition for the close path to hook on — would otherwise stay open forever. See issue #81.
+
+`runPerTickTerminateApps` independently maps blocked Roblox/Discord domains to app process-name prefixes. On macOS, it enumerates processes owned by the logged-in user and sends `SIGTERM` to matching executable basenames using case-insensitive matching. It runs every tick while the identifying domains remain blocked, so a restarted app is terminated on the next tick; it does not depend on an open browser tab. During the existing three-minute warning window, `runProcessWarning` uses a read-only process probe and emits an app-specific native warning only when a matching process is running. Both process presence and termination use the logged-in-user process listing; tests inject the warning probe so they never signal real processes. Other platforms currently no-op.
 
 ### Daily quota tracking
 

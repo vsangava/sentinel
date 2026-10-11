@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -843,6 +844,62 @@ func TestGenerateCloseTabsScript_EmbedsNotification(t *testing.T) {
 	}
 }
 
+func TestGenerateProcessWarningScript_UsesAppNamesAndTerminationMessage(t *testing.T) {
+	g := &MacOSAppleScriptGenerator{}
+	script := g.GenerateProcessWarningScript([]string{"roblox", "discord"})
+
+	for _, want := range []string{
+		`display notification`,
+		`Roblox and Discord will be terminated when the block starts.`,
+		`with title "Sentinel"`,
+		`subtitle "Upcoming Block"`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("process warning script missing %q", want)
+		}
+	}
+}
+
+func TestRunProcessWarning_OnlyNotifiesForRunningBlockedApps(t *testing.T) {
+	domains := []string{"www.ROBLOX.com.", "discordapp.net", "youtube.com"}
+	var probed []string
+	var notified []string
+
+	runProcessWarning(domains, func(apps []string) []string {
+		probed = append(probed, apps...)
+		return []string{"discord"}
+	}, func(apps []string) {
+		notified = append(notified, apps...)
+	})
+
+	if !reflect.DeepEqual(probed, []string{"roblox", "discord"}) {
+		t.Errorf("probed apps = %v, want [roblox discord]", probed)
+	}
+	if !reflect.DeepEqual(notified, []string{"discord"}) {
+		t.Errorf("notified apps = %v, want [discord]", notified)
+	}
+}
+
+func TestRunProcessWarning_SilentWhenNoTargetOrProcess(t *testing.T) {
+	for _, domains := range [][]string{{"youtube.com"}, {"roblox.com"}} {
+		probeCalled := false
+		notifyCalled := false
+		probe := func(apps []string) []string {
+			probeCalled = true
+			return nil
+		}
+		notify := func([]string) { notifyCalled = true }
+
+		runProcessWarning(domains, probe, notify)
+		if probeCalled != (domains[0] == "roblox.com") {
+			t.Errorf("domains %v: probe called = %v", domains, probeCalled)
+		}
+		if notifyCalled {
+			t.Errorf("domains %v: did not expect a notification", domains)
+		}
+	}
+}
+
 func TestGenerateCloseTabsScript_ShortDomainListInNotification(t *testing.T) {
 	g := &MacOSAppleScriptGenerator{}
 	script := g.GenerateCloseTabsScript([]string{"facebook.com", "tiktok.com"})
@@ -1039,6 +1096,61 @@ func TestRunPerTickCloseTabs_FiresOnAlreadyBlockedDomain(t *testing.T) {
 
 	if len(te.executedScripts) != 1 {
 		t.Fatalf("expected close script to fire even without transition, got %d scripts", len(te.executedScripts))
+	}
+}
+
+func TestBlockedProcessNames_OnlyWhenAppDomainsAreBlocked(t *testing.T) {
+	testCases := []struct {
+		name    string
+		blocked map[string]bool
+		want    []string
+	}{
+		{name: "none", blocked: map[string]bool{"facebook.com": true}},
+		{name: "false marker", blocked: map[string]bool{"roblox.com": false}},
+		{name: "Roblox domain", blocked: map[string]bool{"roblox.com": true}, want: []string{"roblox"}},
+		{name: "Roblox subdomain, mixed case", blocked: map[string]bool{"WWW.ROBLOX.COM.": true}, want: []string{"roblox"}},
+		{name: "Discord domain", blocked: map[string]bool{"discordapp.net": true}, want: []string{"discord"}},
+		{name: "both apps", blocked: map[string]bool{"rbxcdn.com": true, "discord.gg": true}, want: []string{"roblox", "discord"}},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := blockedProcessNames(tc.blocked)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("blockedProcessNames() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestProcessNameMatchesApp_IsCaseInsensitiveAndRestrictsToPrefix(t *testing.T) {
+	testCases := []struct {
+		processName string
+		appName     string
+		want        bool
+	}{
+		{processName: "/Applications/RobloxPlayerBeta", appName: "roblox", want: true},
+		{processName: "DISCORD Helper (Renderer)", appName: "discord", want: true},
+		{processName: "Discord", appName: "discord", want: true},
+		{processName: "my-discord-sync", appName: "discord", want: false},
+		{processName: "Chrome Helper", appName: "roblox", want: false},
+	}
+
+	for _, tc := range testCases {
+		if got := processNameMatchesApp(tc.processName, tc.appName); got != tc.want {
+			t.Errorf("processNameMatchesApp(%q, %q) = %v, want %v", tc.processName, tc.appName, got, tc.want)
+		}
+	}
+}
+
+func TestRunPerTickTerminateApps_DoesNotDependOnOpenBrowserTabs(t *testing.T) {
+	var terminated []string
+	runPerTickTerminateApps(map[string]bool{"roblox.com": true}, func(apps []string) {
+		terminated = append(terminated, apps...)
+	})
+
+	if !reflect.DeepEqual(terminated, []string{"roblox"}) {
+		t.Fatalf("terminated apps = %v, want [roblox]", terminated)
 	}
 }
 

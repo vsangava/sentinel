@@ -84,6 +84,7 @@ No. The scheduler's 1-minute ticker is a regular Go timer — it doesn't issue p
 - **Per-group granularity, multiple windows per day** — each domain group has its own independent schedule. Stack multiple block/allow windows in the same day (e.g. block social media 9–12 and 2–6, block gaming from 8pm onward — all as separate rules).
 - **Daily quotas (allowance mode)** — optionally cap how long a group is accessible each day. Add `"daily_quota_minutes": 30` to any rule and the group is blocked for the rest of the day once 30 minutes of active DNS usage is consumed — even if the scheduled window is still open. Requires `dns` or `strict` mode.
 - **Foreground time tracking (opt-in)** — flip `"enable_foreground_tracking": true` and the dashboard shows how long each configured site was the *active* browser tab, idle-aware and ignoring background tabs. Browser-only, works under any enforcement mode — including `hosts`, where DNS-derived usage isn't available. Privacy-scoped to domains you've already configured for blocking. Full fidelity on macOS (Chrome, Safari, Arc, Brave). On Windows it defaults to a coarse window-title heuristic for Chrome and Edge (only catches pages whose title contains the domain); add `"windows_foreground_use_uia": true` to also read the real address bar via UI Automation.
+- **Blocked Roblox and Discord apps are terminated** — a native warning appears during the 3-minute pre-block window when a matching app is running. Once its domains are blocked, matching Roblox or Discord processes are terminated every minute, even if there is no browser tab open. Process names are matched case-insensitively and scoped to the logged-in user. (macOS)
 - **Tabs close automatically** — every minute during an active block, Chrome, Safari, Arc, and Brave have any open tabs for blocked sites closed. This catches not just the moment the block begins but also tabs opened *during* the window (e.g., via Safari iCloud Private Relay or browser DoH that bypass DNS-layer blocking). No willpower required. (macOS)
 - **A heads-up before the block** — a native notification appears 3 minutes early so you can finish what you're doing before the sites go dark. (macOS)
 - **Live config — no restart needed** — edit the schedule file and save; changes take effect within 60 seconds.
@@ -99,6 +100,7 @@ No. The scheduler's 1-minute ticker is a regular Go timer — it doesn't issue p
 | DNS proxy blocking (advanced mode) | ✅ | ✅ |
 | Firewall-layer blocking (strict mode) | ✅ | ❌ |
 | Browser tab closing | ✅ Chrome, Safari | ❌ |
+| Roblox/Discord process termination | ✅ | ❌ |
 | 3-minute pre-block notifications | ✅ | ❌ |
 | Foreground tab time tracking | ✅ Chrome, Safari, Arc, Brave | ⚠ Chrome, Edge — window-title heuristic; address-bar via UI Automation opt-in |
 | Auto-start on boot | ✅ | ✅ |
