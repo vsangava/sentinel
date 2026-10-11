@@ -173,21 +173,11 @@ Open **`http://localhost:8040`** while the service is running. The header displa
 
 **Test tab** lets you ask "would this site be blocked at this time?" before committing to a schedule. You can test against the live rules or paste in a draft config without touching anything live.
 
-**Manage tab** is where you edit rules, add domain groups, and adjust settings. It's PIN-protected to add a small hurdle against impulsive changes — the PIN is just the current time (`HHMM`). The server also enforces an auth token for every API write, so the PIN isn't your only protection.
+**Manage tab** is where you edit rules, add domain groups, and adjust settings. It's PIN-protected to add a small hurdle against impulsive changes. The server also enforces an auth token for every API write, so the PIN isn't your only protection.
 
 <!-- Screenshot: dashboard Manage tab — coming soon -->
 
 ### About the PIN
-
-The PIN is the **current local time in `HHMM` format**, in 24-hour or 12-hour form:
-
-| Local time | Valid PINs |
-|---|---|
-| 2:35 PM | `1435` or `0235` |
-| 9:05 AM | `0905` |
-| 9:05 PM | `2105` or `0905` |
-| 12:00 noon | `1200` |
-| 12:00 midnight | `0000` or `1200` |
 
 The PIN is a friction layer — a moment of pause before making changes — not a security boundary. The real protection is the auth token in `config.json`, which the web UI uses for every mutating API call.
 
