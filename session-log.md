@@ -1075,3 +1075,17 @@ Verified the live v0.3.2 install.sh end-to-end with `bash -x` (reaches `sudo "$T
 - **No regression test, again.** Same gap as the v0.3.1 entry: nothing in CI runs `bash install.sh` against a fresh release. The cheapest guard now would be a job that runs the script against the **previous** release tag's binary (so it doesn't need a chicken-and-egg release-then-test loop), asserting `/usr/local/bin/sentinel` materializes. Not done in this PR — scoped to the bug.
 
 **Wrap-up:** PR [#131](https://github.com/vsangava/sentinel/pull/131) merged; [v0.3.2](https://github.com/vsangava/sentinel/releases/tag/v0.3.2) cut and confirmed working on a real user's machine. `curl -fsSL …/install.sh | sudo bash` actually installs Sentinel for the first time since PR #36 introduced install.sh — both bugs (API/grep and `--setup`/`setup`) now fixed, in v0.3.2 and v0.3.1 respectively.
+
+## Oct 11 — Weekday and Weekend Schedule Keys + v0.3.3
+**Session ID:** `0406d79a` · **PR:** [#133](https://github.com/vsangava/sentinel/pull/133) (merged) · **Release:** [v0.3.3](https://github.com/vsangava/sentinel/releases/tag/v0.3.3)
+
+**Opening prompt:**
+> "I want to support Weekday and Weekend as options to specify in the config file in addition to actual day of the week. It makes it easier to specify common schedules."
+
+**What happened:**
+- Added `Weekday` (Monday-Friday) and `Weekend` (Saturday-Sunday) schedule keys. Category slots combine with specific weekday slots when both are configured.
+- Applied category matching consistently to blocking, pre-block warnings, overnight continuation, test-query reporting, server validation, and dashboard validation and schedule views.
+- Added coverage for category membership, additive behavior, warning timing, test-query output, and Sunday overnight carryover into Monday. Updated README and DESIGN schedule documentation.
+- PR #133 passed CI and was squash-merged to `main`. `make release VERSION=v0.3.3` passed in an isolated worktree: all Go tests and macOS ARM64, macOS Intel, and Windows builds succeeded. The `v0.3.3` tag was pushed to trigger the automated release workflow.
+
+**Wrap-up:** Weekday and Weekend schedules shipped in v0.3.3 without requiring migration of existing configs. The release workflow is publishing its platform binaries.
