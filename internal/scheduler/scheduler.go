@@ -261,6 +261,19 @@ func isOvernightSlot(slotStart, slotEnd time.Time) bool {
 	return slotEnd.Before(slotStart)
 }
 
+// ScheduleKeysForDay returns the exact weekday and its matching day category.
+func ScheduleKeysForDay(day time.Weekday) []string {
+	dayName := day.String()
+	switch day {
+	case time.Monday, time.Tuesday, time.Wednesday, time.Thursday, time.Friday:
+		return []string{dayName, "Weekday"}
+	case time.Saturday, time.Sunday:
+		return []string{dayName, "Weekend"}
+	default:
+		return []string{dayName}
+	}
+}
+
 // EvaluateRulesAtTime evaluates blocking rules at a specific time and returns blocked domains.
 // Returns an empty map immediately if the config has an active pause window.
 // quotaUsage maps group name → minutes used today; pass nil for no quota enforcement.
@@ -285,8 +298,6 @@ func EvaluateRulesAtTime(t time.Time, cfg config.Config, quotaUsage map[string]i
 		return forced
 	}
 
-	currentDay := t.Weekday().String()
-	yesterdayDay := t.AddDate(0, 0, -1).Weekday().String()
 	now := time.Date(0, 1, 1, t.Hour(), t.Minute(), 0, 0, time.UTC)
 
 	newBlocked := make(map[string]bool)
@@ -301,45 +312,49 @@ func EvaluateRulesAtTime(t time.Time, cfg config.Config, quotaUsage map[string]i
 		}
 
 		// Today's slots
-		if slots, exists := rule.Schedules[currentDay]; exists {
-			for _, slot := range slots {
-				slotStart, errS := time.Parse("15:04", slot.Start)
-				slotEnd, errE := time.Parse("15:04", slot.End)
-				if errS != nil || errE != nil {
-					continue
-				}
-				if isOvernightSlot(slotStart, slotEnd) {
-					// Evening portion of an overnight slot: blocks from Start until midnight
-					if now.Equal(slotStart) || now.After(slotStart) {
-						for _, d := range domains {
-							newBlocked[d] = true
-						}
-						break
+		for _, scheduleDay := range ScheduleKeysForDay(t.Weekday()) {
+			if slots, exists := rule.Schedules[scheduleDay]; exists {
+				for _, slot := range slots {
+					slotStart, errS := time.Parse("15:04", slot.Start)
+					slotEnd, errE := time.Parse("15:04", slot.End)
+					if errS != nil || errE != nil {
+						continue
 					}
-				} else {
-					if (now.Equal(slotStart) || now.After(slotStart)) && now.Before(slotEnd) {
-						for _, d := range domains {
-							newBlocked[d] = true
+					if isOvernightSlot(slotStart, slotEnd) {
+						// Evening portion of an overnight slot: blocks from Start until midnight
+						if now.Equal(slotStart) || now.After(slotStart) {
+							for _, d := range domains {
+								newBlocked[d] = true
+							}
+							break
 						}
-						break
+					} else {
+						if (now.Equal(slotStart) || now.After(slotStart)) && now.Before(slotEnd) {
+							for _, d := range domains {
+								newBlocked[d] = true
+							}
+							break
+						}
 					}
 				}
 			}
 		}
 
 		// Yesterday's overnight slots — morning continuation past midnight
-		if slots, exists := rule.Schedules[yesterdayDay]; exists {
-			for _, slot := range slots {
-				slotStart, errS := time.Parse("15:04", slot.Start)
-				slotEnd, errE := time.Parse("15:04", slot.End)
-				if errS != nil || errE != nil {
-					continue
-				}
-				if isOvernightSlot(slotStart, slotEnd) && now.Before(slotEnd) {
-					for _, d := range domains {
-						newBlocked[d] = true
+		for _, scheduleDay := range ScheduleKeysForDay(t.AddDate(0, 0, -1).Weekday()) {
+			if slots, exists := rule.Schedules[scheduleDay]; exists {
+				for _, slot := range slots {
+					slotStart, errS := time.Parse("15:04", slot.Start)
+					slotEnd, errE := time.Parse("15:04", slot.End)
+					if errS != nil || errE != nil {
+						continue
 					}
-					break
+					if isOvernightSlot(slotStart, slotEnd) && now.Before(slotEnd) {
+						for _, d := range domains {
+							newBlocked[d] = true
+						}
+						break
+					}
 				}
 			}
 		}
@@ -383,8 +398,6 @@ func CheckWarningDomainsAtTime(t time.Time, cfg config.Config) []string {
 		return nil
 	}
 
-	currentDay := t.Weekday().String()
-
 	var warningDomains []string
 
 	// Check for warnings within 3-minute window before block start
@@ -397,31 +410,27 @@ func CheckWarningDomainsAtTime(t time.Time, cfg config.Config) []string {
 		if len(domains) == 0 {
 			continue
 		}
-		if slots, exists := rule.Schedules[currentDay]; exists {
-			for _, slot := range slots {
-				// Parse block start time
-				parts := strings.Split(slot.Start, ":")
-				if len(parts) != 2 {
-					continue
-				}
-				blockHour, errH := strconv.Atoi(parts[0])
-				blockMin, errM := strconv.Atoi(parts[1])
-				if errH != nil || errM != nil {
-					continue
-				}
+		for _, scheduleDay := range ScheduleKeysForDay(t.Weekday()) {
+			if slots, exists := rule.Schedules[scheduleDay]; exists {
+				for _, slot := range slots {
+					parts := strings.Split(slot.Start, ":")
+					if len(parts) != 2 {
+						continue
+					}
+					blockHour, errH := strconv.Atoi(parts[0])
+					blockMin, errM := strconv.Atoi(parts[1])
+					if errH != nil || errM != nil {
+						continue
+					}
 
-				// Create block start time for today
-				blockTime := time.Date(t.Year(), t.Month(), t.Day(), blockHour, blockMin, 0, 0, t.Location())
-
-				// Calculate warning window: 3 minutes before block start
-				warningStart := blockTime.Add(-3 * time.Minute)
-
-				// Warn if current time is within [warningStart, blockTime)
-				if (t.After(warningStart) || t.Equal(warningStart)) && t.Before(blockTime) {
-					for _, d := range domains {
-						if !seen[d] {
-							seen[d] = true
-							warningDomains = append(warningDomains, d)
+					blockTime := time.Date(t.Year(), t.Month(), t.Day(), blockHour, blockMin, 0, 0, t.Location())
+					warningStart := blockTime.Add(-3 * time.Minute)
+					if (t.After(warningStart) || t.Equal(warningStart)) && t.Before(blockTime) {
+						for _, d := range domains {
+							if !seen[d] {
+								seen[d] = true
+								warningDomains = append(warningDomains, d)
+							}
 						}
 					}
 				}
@@ -913,4 +922,3 @@ func sendPomodoroNotification(title, message string) {
 		log.Printf("scheduler: pomodoro notification: %v", err)
 	}
 }
-

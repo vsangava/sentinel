@@ -1311,7 +1311,32 @@ function switchTab(tab) {
 }
 
 // ── Shared: config validation ─────────────────────────────────────────────────
-var VALID_DAYS = {Monday:1,Tuesday:1,Wednesday:1,Thursday:1,Friday:1,Saturday:1,Sunday:1};
+var VALID_DAYS = {Monday:1,Tuesday:1,Wednesday:1,Thursday:1,Friday:1,Saturday:1,Sunday:1,Weekday:1,Weekend:1};
+
+function scheduleKeysForDate(date) {
+    var day = date.getDay();
+    var keys = [WEEKDAYS[day]];
+    keys.push(day >= 1 && day <= 5 ? 'Weekday' : 'Weekend');
+    return keys;
+}
+
+function scheduleSlotsForDate(rule, date) {
+    var schedules = rule.schedules || {};
+    var seen = Object.create(null);
+    var slots = [];
+    var keys = scheduleKeysForDate(date);
+    for (var i = 0; i < keys.length; i++) {
+        var daySlots = schedules[keys[i]] || [];
+        for (var j = 0; j < daySlots.length; j++) {
+            var slot = daySlots[j];
+            var signature = slot.start + '/' + slot.end;
+            if (seen[signature]) continue;
+            seen[signature] = true;
+            slots.push(slot);
+        }
+    }
+    return slots;
+}
 
 function parseAndValidate(text) {
     if (!text) return {valid: false, error: 'Config is empty'};
@@ -1562,8 +1587,7 @@ function computeUpcoming(cfg, now, maxEvents, hoursAhead) {
         for (var offset = 0; offset <= 1; offset++) {
             var day     = new Date(now);
             day.setDate(day.getDate() + offset);
-            var weekday = WEEKDAYS[day.getDay()];
-            var slots   = rule.schedules && rule.schedules[weekday];
+            var slots = scheduleSlotsForDate(rule, day);
             if (!slots) continue;
 
             for (var k = 0; k < slots.length; k++) {
@@ -1630,8 +1654,11 @@ function renderRulesSummary(cfg) {
     }
 
     var now          = new Date();
-    var todayName    = WEEKDAYS[now.getDay()];
-    var tomorrowName = WEEKDAYS[(now.getDay() + 1) % 7];
+    var today        = new Date(now);
+    var tomorrow     = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    var todayName    = WEEKDAYS[today.getDay()];
+    var tomorrowName = WEEKDAYS[tomorrow.getDay()];
 
     function fmtSlots(slots) {
         if (!slots || slots.length === 0) return '<span style="color:#dee2e6">—</span>';
@@ -1652,8 +1679,8 @@ function renderRulesSummary(cfg) {
             '<td>' + rule.group + '</td>' +
             '<td style="font-family:monospace;font-size:12px;color:#495057">' + domainsCell + '</td>' +
             '<td>' + badge + '</td>' +
-            '<td>' + fmtSlots(rule.schedules && rule.schedules[todayName]) + '</td>' +
-            '<td>' + fmtSlots(rule.schedules && rule.schedules[tomorrowName]) + '</td>' +
+            '<td>' + fmtSlots(scheduleSlotsForDate(rule, today)) + '</td>' +
+            '<td>' + fmtSlots(scheduleSlotsForDate(rule, tomorrow)) + '</td>' +
             '</tr>';
     }).join('');
 

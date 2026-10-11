@@ -447,13 +447,13 @@ func TestStatusHandler_EmptyWhenNotBlocked(t *testing.T) {
 				IsActive: true,
 				Schedules: map[string][]config.TimeSlot{
 					// Window in the past — never active now
-					"Monday": {{Start: "01:00", End: "01:01"}},
-					"Tuesday": {{Start: "01:00", End: "01:01"}},
+					"Monday":    {{Start: "01:00", End: "01:01"}},
+					"Tuesday":   {{Start: "01:00", End: "01:01"}},
 					"Wednesday": {{Start: "01:00", End: "01:01"}},
-					"Thursday": {{Start: "01:00", End: "01:01"}},
-					"Friday": {{Start: "01:00", End: "01:01"}},
-					"Saturday": {{Start: "01:00", End: "01:01"}},
-					"Sunday": {{Start: "01:00", End: "01:01"}},
+					"Thursday":  {{Start: "01:00", End: "01:01"}},
+					"Friday":    {{Start: "01:00", End: "01:01"}},
+					"Saturday":  {{Start: "01:00", End: "01:01"}},
+					"Sunday":    {{Start: "01:00", End: "01:01"}},
 				},
 			},
 		},
@@ -664,6 +664,23 @@ func TestUpdateConfigHandler_LockedDuringWork_Returns423(t *testing.T) {
 
 	if rr.Code != http.StatusLocked {
 		t.Errorf("expected 423, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestValidatePostedConfig_AllowsDayCategories(t *testing.T) {
+	cfg := config.Config{
+		Groups: map[string][]string{"g": {"example.com"}},
+		Rules: []config.Rule{{
+			Group:    "g",
+			IsActive: true,
+			Schedules: map[string][]config.TimeSlot{
+				"Weekday": {{Start: "09:00", End: "10:00"}},
+				"Weekend": {{Start: "10:00", End: "11:00"}},
+			},
+		}},
+	}
+	if err := ValidatePostedConfig(cfg); err != nil {
+		t.Fatalf("expected day category schedules to be valid, got %v", err)
 	}
 }
 

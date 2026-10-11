@@ -45,6 +45,26 @@ type ScheduleInfo struct {
 	IsActive bool   `json:"is_active"`
 }
 
+func scheduleInfoForTime(rule config.Rule, testTime time.Time) []ScheduleInfo {
+	now := time.Date(0, 1, 1, testTime.Hour(), testTime.Minute(), 0, 0, time.UTC)
+	var scheduleInfo []ScheduleInfo
+	for _, scheduleDay := range scheduler.ScheduleKeysForDay(testTime.Weekday()) {
+		for _, slot := range rule.Schedules[scheduleDay] {
+			slotStart, errS := time.Parse("15:04", slot.Start)
+			slotEnd, errE := time.Parse("15:04", slot.End)
+			active := errS == nil && errE == nil &&
+				(now.Equal(slotStart) || now.After(slotStart)) && now.Before(slotEnd)
+			scheduleInfo = append(scheduleInfo, ScheduleInfo{
+				Weekday:  scheduleDay,
+				Start:    slot.Start,
+				End:      slot.End,
+				IsActive: active,
+			})
+		}
+	}
+	return scheduleInfo
+}
+
 // GetQueryResult returns structured test query result without printing.
 func GetQueryResult(timeStr, domain string) QueryResult {
 	// Load config
@@ -117,7 +137,6 @@ func GetQueryResultWithConfig(timeStr, domain string, cfg config.Config) QueryRe
 	}
 
 	// Find applicable rules — includes parent-domain rules (e.g. youtube.com rule applies to m.youtube.com)
-	now := time.Date(0, 1, 1, testTime.Hour(), testTime.Minute(), 0, 0, time.UTC)
 	for _, rule := range cfg.Rules {
 		if !rule.IsActive {
 			continue
@@ -139,22 +158,7 @@ func GetQueryResultWithConfig(timeStr, domain string, cfg config.Config) QueryRe
 
 		ruleInfo := RuleInfo{Group: rule.Group, MatchedDomain: matched}
 
-		if slots, exists := rule.Schedules[testTime.Weekday().String()]; exists {
-			for _, slot := range slots {
-				slotStart, errS := time.Parse("15:04", slot.Start)
-				slotEnd, errE := time.Parse("15:04", slot.End)
-				var isActive bool
-				if errS == nil && errE == nil {
-					isActive = (now.Equal(slotStart) || now.After(slotStart)) && now.Before(slotEnd)
-				}
-				ruleInfo.Schedules = append(ruleInfo.Schedules, ScheduleInfo{
-					Weekday:  testTime.Weekday().String(),
-					Start:    slot.Start,
-					End:      slot.End,
-					IsActive: isActive,
-				})
-			}
-		}
+		ruleInfo.Schedules = scheduleInfoForTime(rule, testTime)
 
 		if len(ruleInfo.Schedules) > 0 {
 			result.ApplicableRules = append(result.ApplicableRules, ruleInfo)
@@ -251,7 +255,6 @@ func QueryBlocking(timeStr, domain string) error {
 	fmt.Println(dashLine)
 	fmt.Println("Applicable Rules:")
 
-	now := time.Date(0, 1, 1, testTime.Hour(), testTime.Minute(), 0, 0, time.UTC)
 	foundRules := false
 	for _, rule := range cfg.Rules {
 		if !rule.IsActive {
@@ -275,19 +278,15 @@ func QueryBlocking(timeStr, domain string) error {
 		foundRules = true
 		fmt.Printf("  Group: %s (matched %s)\n", rule.Group, matched)
 
-		if slots, exists := rule.Schedules[testTime.Weekday().String()]; exists {
-			for _, slot := range slots {
-				slotStart, errS := time.Parse("15:04", slot.Start)
-				slotEnd, errE := time.Parse("15:04", slot.End)
-				active := errS == nil && errE == nil &&
-					(now.Equal(slotStart) || now.After(slotStart)) && now.Before(slotEnd)
-				if active {
-					fmt.Printf("    ✓ Blocked on %s from %s to %s (ACTIVE)\n", testTime.Weekday(), slot.Start, slot.End)
-				} else {
-					fmt.Printf("    ○ Blocked on %s from %s to %s (not active now)\n", testTime.Weekday(), slot.Start, slot.End)
-				}
+		scheduleInfo := scheduleInfoForTime(rule, testTime)
+		for _, schedule := range scheduleInfo {
+			if schedule.IsActive {
+				fmt.Printf("    ✓ Blocked on %s from %s to %s (ACTIVE)\n", schedule.Weekday, schedule.Start, schedule.End)
+			} else {
+				fmt.Printf("    ○ Blocked on %s from %s to %s (not active now)\n", schedule.Weekday, schedule.Start, schedule.End)
 			}
-		} else {
+		}
+		if len(scheduleInfo) == 0 {
 			fmt.Printf("    ○ No schedule for %s\n", testTime.Weekday())
 		}
 	}
@@ -310,4 +309,3 @@ func QueryBlocking(timeStr, domain string) error {
 
 	return nil
 }
-
