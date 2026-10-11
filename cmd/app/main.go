@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -133,7 +134,7 @@ func isPortConflict(err error) bool {
 		}
 	}
 	msg := err.Error()
-	return strings.Contains(msg, "address already in use") ||       // Linux / macOS
+	return strings.Contains(msg, "address already in use") || // Linux / macOS
 		strings.Contains(msg, "Only one usage of each socket") // Windows
 }
 
@@ -357,6 +358,50 @@ func runClean(yes bool) {
 	fmt.Println("System is clean. sentinel has been fully removed.")
 }
 
+const maxPauseMinutes = 240
+const defaultPauseMinutes = 30
+
+func pauseSentinel(args []string, now time.Time) (time.Time, error) {
+	if len(args) > 1 {
+		return time.Time{}, fmt.Errorf("usage: sentinel pause [minutes] (default %d, range 1-%d)", defaultPauseMinutes, maxPauseMinutes)
+	}
+	minutes := defaultPauseMinutes
+	if len(args) == 1 {
+		parsedMinutes, err := strconv.Atoi(args[0])
+		if err != nil || parsedMinutes < 1 || parsedMinutes > maxPauseMinutes {
+			return time.Time{}, fmt.Errorf("pause duration must be between 1 and %d minutes", maxPauseMinutes)
+		}
+		minutes = parsedMinutes
+	}
+	if err := config.LoadConfig(); err != nil {
+		return time.Time{}, fmt.Errorf("load config: %w", err)
+	}
+	if config.GetConfig().IsLockedByPomodoro(now) {
+		return time.Time{}, fmt.Errorf("blocking cannot be paused during a Pomodoro work session")
+	}
+
+	until := now.Add(time.Duration(minutes) * time.Minute)
+	config.SetPause(until)
+	if err := config.SaveConfig(); err != nil {
+		return time.Time{}, fmt.Errorf("save pause: %w", err)
+	}
+	return until, nil
+}
+
+func resumeSentinel(args []string) error {
+	if len(args) != 0 {
+		return fmt.Errorf("usage: sentinel resume")
+	}
+	if err := config.LoadConfig(); err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	config.ClearPause()
+	if err := config.SaveConfig(); err != nil {
+		return fmt.Errorf("save resume: %w", err)
+	}
+	return nil
+}
+
 func main() {
 	// setup installs the binary to a stable path (macOS: /usr/local/bin/sentinel;
 	// Windows: %ProgramFiles%\Sentinel\sentinel.exe), registers the service
@@ -372,6 +417,23 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "clean" {
 		yes := len(os.Args) > 2 && os.Args[2] == "--yes"
 		runClean(yes)
+		return
+	}
+
+	if len(os.Args) > 1 && os.Args[1] == "pause" {
+		until, err := pauseSentinel(os.Args[2:], time.Now())
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Printf("Sentinel paused until %s.\n", until.Format(time.RFC3339))
+		return
+	}
+
+	if len(os.Args) > 1 && os.Args[1] == "resume" {
+		if err := resumeSentinel(os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println("Sentinel resumed.")
 		return
 	}
 

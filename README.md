@@ -173,21 +173,11 @@ Open **`http://localhost:8040`** while the service is running. The header displa
 
 **Test tab** lets you ask "would this site be blocked at this time?" before committing to a schedule. You can test against the live rules or paste in a draft config without touching anything live.
 
-**Manage tab** is where you edit rules, add domain groups, and adjust settings. It's PIN-protected to add a small hurdle against impulsive changes — the PIN is just the current time (`HHMM`). The server also enforces an auth token for every API write, so the PIN isn't your only protection.
+**Manage tab** is where you edit rules, add domain groups, and adjust settings. It's PIN-protected to add a small hurdle against impulsive changes. The server also enforces an auth token for every API write, so the PIN isn't your only protection.
 
 <!-- Screenshot: dashboard Manage tab — coming soon -->
 
 ### About the PIN
-
-The PIN is the **current local time in `HHMM` format**, in 24-hour or 12-hour form:
-
-| Local time | Valid PINs |
-|---|---|
-| 2:35 PM | `1435` or `0235` |
-| 9:05 AM | `0905` |
-| 9:05 PM | `2105` or `0905` |
-| 12:00 noon | `1200` |
-| 12:00 midnight | `0000` or `1200` |
 
 The PIN is a friction layer — a moment of pause before making changes — not a security boundary. The real protection is the auth token in `config.json`, which the web UI uses for every mutating API call.
 
@@ -357,7 +347,19 @@ If you're upgrading from a version that used a single `config.json`, Sentinel mi
 
 ## Pause & resume
 
-Sometimes you need a legitimate break from your own rules — a video call, a quick research rabbit hole, a link a colleague sent. Use the **Manage** tab in the dashboard to pause for up to 4 hours, or use the API:
+Sometimes you need a legitimate break from your own rules — a video call, a quick research rabbit hole, a link a colleague sent. Use the **Manage** tab in the dashboard, the CLI, or the API to pause for up to 4 hours:
+
+```bash
+# Pause for the default 30 minutes, specify another duration, or resume
+# immediately (system config may require sudo)
+sudo sentinel pause
+sudo sentinel pause 30
+sudo sentinel resume
+```
+
+The CLI defaults to 30 minutes and accepts explicit durations from 1 to 240 minutes. Changes are picked up by the running daemon on its next scheduler tick.
+
+Or call the API directly:
 
 ```bash
 TOKEN=$(curl -s http://localhost:8040/api/config | jq -r '.settings.auth_token')
