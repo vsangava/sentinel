@@ -357,7 +357,17 @@ If you're upgrading from a version that used a single `config.json`, Sentinel mi
 
 ## Pause & resume
 
-Sometimes you need a legitimate break from your own rules — a video call, a quick research rabbit hole, a link a colleague sent. Use the **Manage** tab in the dashboard to pause for up to 4 hours, or use the API:
+Sometimes you need a legitimate break from your own rules — a video call, a quick research rabbit hole, a link a colleague sent. Use the **Manage** tab in the dashboard, the CLI, or the API to pause for up to 4 hours:
+
+```bash
+# Pause for 30 minutes or resume immediately (system config may require sudo)
+sudo sentinel pause 30
+sudo sentinel resume
+```
+
+The CLI accepts pause durations from 1 to 240 minutes. Changes are picked up by the running daemon on its next scheduler tick.
+
+Or call the API directly:
 
 ```bash
 TOKEN=$(curl -s http://localhost:8040/api/config | jq -r '.settings.auth_token')
