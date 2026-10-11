@@ -134,7 +134,7 @@ func isPortConflict(err error) bool {
 		}
 	}
 	msg := err.Error()
-		return strings.Contains(msg, "address already in use") ||       // Linux / macOS
+	return strings.Contains(msg, "address already in use") || // Linux / macOS
 		strings.Contains(msg, "Only one usage of each socket") // Windows
 }
 
@@ -359,14 +359,19 @@ func runClean(yes bool) {
 }
 
 const maxPauseMinutes = 240
+const defaultPauseMinutes = 30
 
 func pauseSentinel(args []string, now time.Time) (time.Time, error) {
-	if len(args) != 1 {
-		return time.Time{}, fmt.Errorf("usage: sentinel pause <minutes> (1-%d)", maxPauseMinutes)
+	if len(args) > 1 {
+		return time.Time{}, fmt.Errorf("usage: sentinel pause [minutes] (default %d, range 1-%d)", defaultPauseMinutes, maxPauseMinutes)
 	}
-	minutes, err := strconv.Atoi(args[0])
-	if err != nil || minutes < 1 || minutes > maxPauseMinutes {
-		return time.Time{}, fmt.Errorf("pause duration must be between 1 and %d minutes", maxPauseMinutes)
+	minutes := defaultPauseMinutes
+	if len(args) == 1 {
+		parsedMinutes, err := strconv.Atoi(args[0])
+		if err != nil || parsedMinutes < 1 || parsedMinutes > maxPauseMinutes {
+			return time.Time{}, fmt.Errorf("pause duration must be between 1 and %d minutes", maxPauseMinutes)
+		}
+		minutes = parsedMinutes
 	}
 	if err := config.LoadConfig(); err != nil {
 		return time.Time{}, fmt.Errorf("load config: %w", err)

@@ -41,10 +41,23 @@ func TestPauseSentinelPersistsPause(t *testing.T) {
 	}
 }
 
+func TestPauseSentinelDefaultsTo30Minutes(t *testing.T) {
+	useTempConfig(t)
+	now := time.Date(2026, time.October, 11, 12, 0, 0, 0, time.UTC)
+
+	until, err := pauseSentinel(nil, now)
+	if err != nil {
+		t.Fatalf("pauseSentinel: %v", err)
+	}
+	if want := now.Add(30 * time.Minute); !until.Equal(want) {
+		t.Errorf("pause until = %s, want default %s", until, want)
+	}
+}
+
 func TestPauseSentinelValidatesDurationAndPomodoroLock(t *testing.T) {
 	useTempConfig(t)
 	now := time.Date(2026, time.October, 11, 12, 0, 0, 0, time.UTC)
-	for _, args := range [][]string{{}, {"0"}, {"241"}, {"abc"}, {"30", "extra"}} {
+	for _, args := range [][]string{{"0"}, {"241"}, {"abc"}, {"30", "extra"}} {
 		if _, err := pauseSentinel(args, now); err == nil {
 			t.Errorf("pauseSentinel(%v) expected an error", args)
 		}
