@@ -1089,3 +1089,17 @@ Verified the live v0.3.2 install.sh end-to-end with `bash -x` (reaches `sudo "$T
 - PR #133 passed CI and was squash-merged to `main`. `make release VERSION=v0.3.3` passed in an isolated worktree: all Go tests and macOS ARM64, macOS Intel, and Windows builds succeeded. The `v0.3.3` tag was pushed to trigger the automated release workflow.
 
 **Wrap-up:** Weekday and Weekend schedules shipped in v0.3.3 without requiring migration of existing configs. The release workflow is publishing its platform binaries.
+
+## Oct 11 — Roblox and Discord Process Enforcement + v0.3.4
+**Session ID:** `0406d79a` · **PR:** [#135](https://github.com/vsangava/sentinel/pull/135) (merged) · **Release:** [v0.3.4](https://github.com/vsangava/sentinel/releases/tag/v0.3.4)
+
+**Opening prompt:**
+> "new plan: if roblox is in the block list, along with closing the browser tab, I also want to kill any process with roblox name. same for discord. case insensitive matches."
+
+**What happened:**
+- Added macOS process enforcement for Roblox and Discord when their identifying domains are actively blocked. Process executable names are matched case-insensitively and scoped to the logged-in user; matching processes receive `SIGTERM` each scheduler tick so restarted apps are also stopped.
+- Added an independent pre-block process probe and an app-specific native warning when Roblox or Discord is running. This warning does not depend on a browser tab being open.
+- Added injectable warning tests and coverage for app/domain selection and process-name matching. Updated README, DESIGN, and the public landing-page feature copy. Other platforms currently no-op for process enumeration and termination.
+- PR #135 passed CI and was squash-merged. `make release VERSION=v0.3.4` passed in an isolated worktree, including all Go tests and macOS ARM64, macOS Intel, and Windows builds. The `v0.3.4` tag was pushed to trigger the automated release workflow.
+
+**Wrap-up:** Roblox/Discord process termination and process-aware warnings shipped in v0.3.4. The automated workflow is publishing the release assets.
