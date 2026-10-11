@@ -77,6 +77,8 @@ func ValidatePostedConfig(cfg config.Config) error {
 		"Friday":    true,
 		"Saturday":  true,
 		"Sunday":    true,
+		"Weekday":   true,
+		"Weekend":   true,
 	}
 
 	if mode := cfg.Settings.EnforcementMode; mode != "" {
@@ -213,11 +215,11 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 		for _, rule := range quotaRules {
 			used := proxy.ComputeGroupUsageMinutes(events, rule.Group, now)
 			quotas = append(quotas, map[string]any{
-				"group":            rule.Group,
-				"quota_minutes":    rule.DailyQuotaMinutes,
-				"used_minutes":     used,
-				"quota_exceeded":   used >= rule.DailyQuotaMinutes,
-				"mode_compatible":  cfg.Settings.GetEnforcementMode() != "hosts",
+				"group":           rule.Group,
+				"quota_minutes":   rule.DailyQuotaMinutes,
+				"used_minutes":    used,
+				"quota_exceeded":  used >= rule.DailyQuotaMinutes,
+				"mode_compatible": cfg.Settings.GetEnforcementMode() != "hosts",
 			})
 		}
 		resp["quotas"] = quotas
@@ -271,7 +273,7 @@ func PauseHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(map[string]string{
-		"status":      "ok",
+		"status":       "ok",
 		"paused_until": until.Format(time.RFC3339),
 	})
 }
@@ -729,10 +731,10 @@ func UsageHandler(w http.ResponseWriter, r *http.Request) {
 	// windows — naturally minute-granular because the scheduler ticks each
 	// minute and emits at most one foreground event per tick.
 	type groupRow struct {
-		Group              string `json:"group"`
-		UsedMinutes        int    `json:"used_minutes"`
-		ForegroundMinutes  int    `json:"foreground_minutes,omitempty"`
-		QuotaMinutes       int    `json:"quota_minutes,omitempty"`
+		Group             string `json:"group"`
+		UsedMinutes       int    `json:"used_minutes"`
+		ForegroundMinutes int    `json:"foreground_minutes,omitempty"`
+		QuotaMinutes      int    `json:"quota_minutes,omitempty"`
 	}
 	groupMap := make(map[string]*groupRow)
 	for _, rule := range cfg.Rules {
@@ -742,10 +744,10 @@ func UsageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type domainRow struct {
-		Domain             string `json:"domain"`
-		Group              string `json:"group"`
-		UsedMinutes        int    `json:"used_minutes"`
-		ForegroundMinutes  int    `json:"foreground_minutes,omitempty"`
+		Domain            string `json:"domain"`
+		Group             string `json:"group"`
+		UsedMinutes       int    `json:"used_minutes"`
+		ForegroundMinutes int    `json:"foreground_minutes,omitempty"`
 	}
 	// DNS-kind aggregations: 5-minute buckets per domain/group.
 	dnsDomainBuckets := make(map[string]map[int64]struct{})
@@ -814,10 +816,10 @@ func UsageHandler(w http.ResponseWriter, r *http.Request) {
 	domainRows := make([]domainRow, 0, len(domainKeys))
 	for domain := range domainKeys {
 		domainRows = append(domainRows, domainRow{
-			Domain:             domain,
-			Group:              gl[domain],
-			UsedMinutes:        len(dnsDomainBuckets[domain]) * 5,
-			ForegroundMinutes:  len(fgDomainBuckets[domain]),
+			Domain:            domain,
+			Group:             gl[domain],
+			UsedMinutes:       len(dnsDomainBuckets[domain]) * 5,
+			ForegroundMinutes: len(fgDomainBuckets[domain]),
 		})
 	}
 

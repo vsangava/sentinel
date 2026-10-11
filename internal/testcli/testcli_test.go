@@ -27,6 +27,25 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+func TestScheduleInfoForTimeIncludesCategoryAndSpecificDay(t *testing.T) {
+	rule := config.Rule{Schedules: map[string][]config.TimeSlot{
+		"Weekday": {{Start: "09:00", End: "11:00"}},
+		"Monday":  {{Start: "14:00", End: "16:00"}},
+	}}
+	testTime := time.Date(2024, time.April, 1, 10, 0, 0, 0, time.UTC)
+
+	schedules := scheduleInfoForTime(rule, testTime)
+	if len(schedules) != 2 {
+		t.Fatalf("expected category and specific-day schedules, got %+v", schedules)
+	}
+	if schedules[0].Weekday != "Monday" || schedules[0].IsActive {
+		t.Errorf("unexpected specific-day schedule: %+v", schedules[0])
+	}
+	if schedules[1].Weekday != "Weekday" || !schedules[1].IsActive {
+		t.Errorf("unexpected category schedule: %+v", schedules[1])
+	}
+}
+
 func TestQueryBlocking_ValidTimeFormat(t *testing.T) {
 	config.UseLocalConfig = true
 	err := QueryBlocking("2024-04-01 10:30", "google.com")

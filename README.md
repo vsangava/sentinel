@@ -230,6 +230,8 @@ The bootstrap (`sentinel.json`) holds everything except rules:
 
 A profile file (`profiles/default.json`) holds only the rules:
 
+Use `Weekday` for Monday through Friday and `Weekend` for Saturday and Sunday instead of repeating the same slots for each day. If a rule includes both a category and a specific weekday, both schedules apply.
+
 ```json
 {
   "rules": [
@@ -237,26 +239,16 @@ A profile file (`profiles/default.json`) holds only the rules:
       "group": "games",
       "is_active": true,
       "schedules": {
-        "Monday":    [{"start": "09:00", "end": "12:00"}, {"start": "14:00", "end": "16:00"}, {"start": "18:00", "end": "19:00"}],
-        "Tuesday":   [{"start": "09:00", "end": "12:00"}, {"start": "14:00", "end": "16:00"}, {"start": "18:00", "end": "19:00"}],
-        "Wednesday": [{"start": "09:00", "end": "12:00"}, {"start": "14:00", "end": "16:00"}, {"start": "18:00", "end": "19:00"}],
-        "Thursday":  [{"start": "09:00", "end": "12:00"}, {"start": "14:00", "end": "16:00"}, {"start": "18:00", "end": "19:00"}],
-        "Friday":    [{"start": "09:00", "end": "12:00"}, {"start": "14:00", "end": "16:00"}, {"start": "18:00", "end": "19:00"}],
-        "Saturday":  [{"start": "09:00", "end": "12:00"}, {"start": "18:00", "end": "19:00"}],
-        "Sunday":    [{"start": "09:00", "end": "12:00"}, {"start": "18:00", "end": "19:00"}]
+        "Weekday": [{"start": "09:00", "end": "12:00"}, {"start": "14:00", "end": "16:00"}, {"start": "18:00", "end": "19:00"}],
+        "Weekend": [{"start": "09:00", "end": "12:00"}, {"start": "18:00", "end": "19:00"}]
       }
     },
     {
       "group": "videos",
       "is_active": true,
       "schedules": {
-        "Monday":    [{"start": "09:00", "end": "12:00"}, {"start": "14:00", "end": "16:00"}, {"start": "18:00", "end": "19:00"}],
-        "Tuesday":   [{"start": "09:00", "end": "12:00"}, {"start": "14:00", "end": "16:00"}, {"start": "18:00", "end": "19:00"}],
-        "Wednesday": [{"start": "09:00", "end": "12:00"}, {"start": "14:00", "end": "16:00"}, {"start": "18:00", "end": "19:00"}],
-        "Thursday":  [{"start": "09:00", "end": "12:00"}, {"start": "14:00", "end": "16:00"}, {"start": "18:00", "end": "19:00"}],
-        "Friday":    [{"start": "09:00", "end": "12:00"}, {"start": "14:00", "end": "16:00"}, {"start": "18:00", "end": "19:00"}],
-        "Saturday":  [{"start": "09:00", "end": "12:00"}, {"start": "18:00", "end": "19:00"}],
-        "Sunday":    [{"start": "09:00", "end": "12:00"}, {"start": "18:00", "end": "19:00"}]
+        "Weekday": [{"start": "09:00", "end": "12:00"}, {"start": "14:00", "end": "16:00"}, {"start": "18:00", "end": "19:00"}],
+        "Weekend": [{"start": "09:00", "end": "12:00"}, {"start": "18:00", "end": "19:00"}]
       }
     },
     {

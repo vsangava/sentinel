@@ -423,6 +423,22 @@ func TestCheckWarningDomainsAtTime_WarningTriggersAtEveryMinute(t *testing.T) {
 	}
 }
 
+func TestCheckWarningDomainsAtTime_WeekdayCategory(t *testing.T) {
+	cfg := singleGroup("example.com", true, map[string][]config.TimeSlot{
+		"Weekday": {{Start: "10:00", End: "12:00"}},
+	})
+
+	friday := time.Date(2024, time.April, 5, 9, 57, 0, 0, time.UTC)
+	if warnings := CheckWarningDomainsAtTime(friday, cfg); len(warnings) != 1 {
+		t.Fatalf("expected weekday category warning on Friday, got %v", warnings)
+	}
+
+	saturday := time.Date(2024, time.April, 6, 9, 57, 0, 0, time.UTC)
+	if warnings := CheckWarningDomainsAtTime(saturday, cfg); len(warnings) != 0 {
+		t.Fatalf("expected no weekday category warning on Saturday, got %v", warnings)
+	}
+}
+
 func TestEvaluateRulesAtTime_AllWeekdaySchedules(t *testing.T) {
 	weekdays := []struct {
 		day       string
@@ -448,6 +464,69 @@ func TestEvaluateRulesAtTime_AllWeekdaySchedules(t *testing.T) {
 		if !result["youtube.com"] {
 			t.Errorf("expected youtube.com to be blocked on %s at 10:00", wd.day)
 		}
+	}
+}
+
+func TestEvaluateRulesAtTime_DayCategorySchedules(t *testing.T) {
+	testCases := []struct {
+		name      string
+		date      int
+		schedule  string
+		shouldHit bool
+	}{
+		{name: "weekday Monday", date: 1, schedule: "Weekday", shouldHit: true},
+		{name: "weekday Friday", date: 5, schedule: "Weekday", shouldHit: true},
+		{name: "weekday excludes Saturday", date: 6, schedule: "Weekday"},
+		{name: "weekend Saturday", date: 6, schedule: "Weekend", shouldHit: true},
+		{name: "weekend Sunday", date: 7, schedule: "Weekend", shouldHit: true},
+		{name: "weekend excludes Friday", date: 5, schedule: "Weekend"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := singleGroup("example.com", true, map[string][]config.TimeSlot{
+				tc.schedule: {{Start: "09:00", End: "11:00"}},
+			})
+			testTime := time.Date(2024, time.April, tc.date, 10, 0, 0, 0, time.UTC)
+			blocked := EvaluateRulesAtTime(testTime, cfg, nil)["example.com"]
+			if blocked != tc.shouldHit {
+				t.Errorf("blocked = %v, want %v", blocked, tc.shouldHit)
+			}
+		})
+	}
+}
+
+func TestEvaluateRulesAtTime_DayCategoryAndSpecificDayCombine(t *testing.T) {
+	cfg := singleGroup("example.com", true, map[string][]config.TimeSlot{
+		"Weekday": {{Start: "09:00", End: "10:00"}},
+		"Monday":  {{Start: "10:00", End: "11:00"}},
+	})
+
+	for _, hour := range []int{9, 10} {
+		testTime := time.Date(2024, time.April, 1, hour, 30, 0, 0, time.UTC)
+		if !EvaluateRulesAtTime(testTime, cfg, nil)["example.com"] {
+			t.Errorf("expected category or specific-day slot to block at %02d:30", hour)
+		}
+	}
+}
+
+func TestEvaluateRulesAtTime_WeekendOvernightContinuesIntoMonday(t *testing.T) {
+	cfg := singleGroup("example.com", true, map[string][]config.TimeSlot{
+		"Weekend": {{Start: "21:30", End: "08:00"}},
+	})
+
+	for _, testTime := range []time.Time{
+		time.Date(2024, time.April, 7, 22, 0, 0, 0, time.UTC),
+		time.Date(2024, time.April, 8, 7, 0, 0, 0, time.UTC),
+	} {
+		if !EvaluateRulesAtTime(testTime, cfg, nil)["example.com"] {
+			t.Errorf("expected weekend overnight slot to block at %s", testTime)
+		}
+	}
+
+	tuesday := time.Date(2024, time.April, 9, 7, 0, 0, 0, time.UTC)
+	if EvaluateRulesAtTime(tuesday, cfg, nil)["example.com"] {
+		t.Errorf("expected weekend overnight slot not to block Tuesday morning")
 	}
 }
 

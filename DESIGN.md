@@ -238,7 +238,7 @@ func CheckWarningDomainsAtTime(t time.Time, cfg config.Config) []string
 
 1. If `cfg.IsPaused(t)` — return empty map (pause overrides everything).
 2. If `cfg.IsLockedByPomodoro(t)` — return the union of every active rule's resolved domains (focus session forces blocking on, ignoring schedules and quota). See section 8 for details.
-3. For each rule with `is_active=true`, resolve `cfg.ResolveGroup(rule.Group)` to a domain list (skip the rule if the group is missing or empty), then look up `Schedules[t.Weekday().String()]`.
+3. For each rule with `is_active=true`, resolve `cfg.ResolveGroup(rule.Group)` to a domain list (skip the rule if the group is missing or empty), then combine slots from the exact weekday key and its category key (`Weekday` for Monday-Friday; `Weekend` for Saturday-Sunday). If both the category and exact weekday are configured, both sets of slots apply.
 4. For each slot, parse `Start`/`End` as `15:04`, build a same-day comparison time, check `slotStart <= now < slotEnd`.
 5. On the first matching slot, add every domain in the resolved group to the result and stop checking remaining slots for that rule.
 6. After schedule evaluation, if `quotaUsage` is non-nil, add every domain from any rule whose group has `used >= DailyQuotaMinutes` — quota-exhausted groups are blocked for the rest of the day regardless of the schedule window.
