@@ -76,6 +76,7 @@ var scriptExecutor ScriptExecutor = &MacOSScriptExecutor{}
 // AppleScriptGenerator interface for testing script generation
 type AppleScriptGenerator interface {
 	GenerateWarningScript(domains []string) string
+	GenerateProcessWarningScript(apps []string) string
 	GenerateCloseTabsScript(domains []string) string
 }
 
@@ -84,6 +85,11 @@ type MacOSAppleScriptGenerator struct{}
 
 func (g *MacOSAppleScriptGenerator) GenerateWarningScript(domains []string) string {
 	msg := fmt.Sprintf("Tabs for %s will close in 3 minutes.", strings.Join(domains, ", "))
+	return fmt.Sprintf(`display notification "%s" with title "Sentinel" subtitle "Upcoming Block" sound name "Basso"`, msg)
+}
+
+func (g *MacOSAppleScriptGenerator) GenerateProcessWarningScript(apps []string) string {
+	msg := fmt.Sprintf("%s will be terminated when the block starts.", strings.Join(displayAppNames(apps), " and "))
 	return fmt.Sprintf(`display notification "%s" with title "Sentinel" subtitle "Upcoming Block" sound name "Basso"`, msg)
 }
 
@@ -560,6 +566,7 @@ func evaluateRules() {
 	// ~60s. Filters out the _doh group: those endpoints aren't sites users visit
 	// with browsers, and probing for them wastes osascript work.
 	runPerTickCloseTabs(newBlocked, cfg, browserTabProbe)
+	runPerTickTerminateApps(newBlocked, terminateBlockedProcesses)
 
 	// Per-tick foreground-tab tracker. Off by default; opt-in via
 	// settings.enable_foreground_tracking. Independent of enforcement_mode —
@@ -634,6 +641,7 @@ func evaluateRules() {
 		lastWarningMu.Unlock()
 		if len(domainsToWarn) > 0 {
 			runMacOSWarning(domainsToWarn)
+			runMacOSProcessWarning(domainsToWarn)
 		}
 	}
 }
@@ -862,6 +870,14 @@ func runMacOSWarning(domains []string) {
 	script := scriptGenerator.GenerateWarningScript(openDomains)
 	scriptExecutor.LogScript(script)
 	scriptExecutor.ExecuteScript(script)
+}
+
+func runMacOSProcessWarning(domains []string) {
+	runProcessWarning(domains, findRunningAppProcesses, func(apps []string) {
+		script := scriptGenerator.GenerateProcessWarningScript(apps)
+		scriptExecutor.LogScript(script)
+		scriptExecutor.ExecuteScript(script)
+	})
 }
 
 func closeMacOSTabs(domains []string) {
